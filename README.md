@@ -47,8 +47,7 @@ pip install -r requirements.txt
 ```bash
 # Checkout
 git checkout -b my-feature-branch
-# Make your code modifications...
-# Implement your custom inference logic based on DummyPolicy in demo.py.
+# Follow the instructions in demo.py to modify parameters and implement your custom inference logic based on DummyPolicy.
 ```
 
 ### 3. Test
