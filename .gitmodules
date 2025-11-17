@@ -1,0 +1,3 @@
+[submodule "openpi"]
+	path = openpi
+	url = https://github.com/RoboChallenge/openpi.git

@@ -1,3 +1,38 @@
+# pi05 stack bowl task example
+This branch is a simple example code of running inference of a fine-tuned pi05 on the stack bowl task.
+
+## Installation
+```bash
+uv venv
+uv pip install -e ./openpi
+uv pip install pytest
+uv pip install -r requirements.txt
+```
+
+## Download the example model
+Download the example fine-tuned model weights from HuggingFace:
+https://huggingface.co/RoboChallengeAI/robochallenge_pi05_ft_aloha_qpos_stackbowls_fps15
+
+## Run the mock test
+Start mock server first
+```bash
+uv run --directory mock_server mock_robot_server.py
+```
+Run the test script
+```bash
+uv run test.py --checkpoint <path_to_your_model_weights>
+```
+
+
+## Run the demo
+If you have registered RoboChallenge and made a submission, run the demo script to start the inference.
+```bash
+python demo.py --checkpoint <path_to_your_model_weights> --user_token <your_user_token> --run_id <your_run_id>
+```
+
+
+# Original README.md
+
 # RoboChallengeInference
 
 ## Project Structure

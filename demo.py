@@ -1,8 +1,13 @@
 import argparse
 import logging
 
+import cv2
+import numpy as np
+
 from robot.interface_client import InterfaceClient
 from robot.job_worker import job_loop
+from openpi.training import config as _config
+from openpi.policies import policy_config
 
 logging.basicConfig(
     filename='mylogfile.log',  # Log file name
@@ -11,44 +16,32 @@ logging.basicConfig(
 )
 
 
-class DummyPolicy:
-    """
-    Example policy class.
-    Users should implement the __init__ and run_policy methods according to their own logic.
-    """
-
-    def __init__(self, checkpoint_path):
-        """
-        Initialize the policy.
-        Args:
-            checkpoint_path (str): Path to the model checkpoint file.
-        """
-        pass  # TODO: Load your model here using the checkpoint_path
-
-    def run_policy(self, input_data):
-        """
-        Run inference using the policy/model.
-        Args:
-            input_data: Input data for inference.
-        Returns:
-            list: Inference results.
-        """
-        # TODO: Implement your inference logic here (e.g., GPU model inference)
-        return []
-
-
 class GPUClient:
     """
     Inference client class.
     """
 
-    def __init__(self, policy):
+    def __init__(self, checkpoint_path):
         """
         Initialize the inference client with a policy.
         Args:
             policy (DummyPolicy): An instance of the policy class.
         """
+        config = _config.get_config("pi05_ft_aloha_qpos_stackbowls_fps15")
+
+        # Create a trained policy.
+        policy = policy_config.create_trained_policy(config,checkpoint_path)
         self.policy = policy
+        self.image_mapping = {"high": "observation/cam_high",
+                              "left_hand": "observation/cam_wrist_left",
+                              "right_hand": "observation/cam_wrist_right",
+                              }
+
+    def decode(self, b: bytes):
+        image = cv2.imdecode(
+            np.frombuffer(b, dtype=np.uint8), cv2.IMREAD_UNCHANGED
+        )
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     def infer(self, state):
         """
@@ -58,8 +51,16 @@ class GPUClient:
         Returns:
             list: Inference results from the policy. Refer to README.md#post-action request parameters for details. This will be the `actions` field in the request.
         """
-        result = self.policy.run_policy(state)
-        return result
+        inputs = {}
+        for k in self.image_mapping:
+            inputs[self.image_mapping[k]] = self.decode(state['images'][k])
+        inputs['prompt'] = 'stack_the_bowls_together'
+        action = np.array(state['action'], np.float32)
+        inputs['state'] = action[[0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 6, 13]]
+        action_chunk = self.policy.infer(inputs)["actions"][:16]
+        actions = np.array(action_chunk)
+        result = actions[:, [0, 1, 2, 3, 4, 5, 12, 6, 7, 8, 9, 10, 11, 13]]
+        return result.tolist()
 
 
 def main():
@@ -73,14 +74,13 @@ def main():
     args = parser.parse_args()
 
     # these args are generally not changed during evaluation, so we put them here.
-    image_size = [224, 224] # this refers to README.md#get-state request parameter `width` and `height`
-    image_type = ["high", "left_hand", "right_hand"] # this refers to README.md#get-state request parameter `image_type`
-    action_type = "joint" # this refers to both README.md#get-state and README.md#post-action parameters `action_type`
-    duration = 0.05 # this refers to README.md#post-action request parameter `duration`
+    image_size = [224, 224]  # this refers to README.md#get-state request parameter `width` and `height`
+    image_type = ["high", "left_hand", "right_hand"]  # this refers to README.md#get-state request parameter `image_type`
+    action_type = "joint"  # this refers to both README.md#get-state and README.md#post-action parameters `action_type`
+    duration = 0.05  # this refers to README.md#post-action request parameter `duration`
 
     client = InterfaceClient(args.user_token)
-    policy = DummyPolicy(args.checkpoint)  # add your own parameters
-    gpu_client = GPUClient(policy)  # add your own parameters
+    gpu_client = GPUClient(args.checkpoint)  # add your own parameters
 
     # main job loop. This function monitors when jobs are ready to eval and do the evaluation
     job_loop(client, gpu_client, args.run_id, image_size, image_type, action_type, duration)

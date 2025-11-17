@@ -2,7 +2,7 @@ import argparse
 import logging
 import time
 
-from demo import GPUClient, DummyPolicy
+from demo import GPUClient
 from robot.interface_client import InterfaceClient
 
 logging.basicConfig(
@@ -60,8 +60,7 @@ def main():
     client = InterfaceClient(DEFAULT_USER_ID,mock=True)
     client.update_job_info(DEFAULT_JOBS[0], DEFAULT_ROBOT_ID)
     
-    policy = DummyPolicy(args.checkpoint)
-    gpu_client = GPUClient(policy)
+    gpu_client = GPUClient(args.checkpoint)
 
     jobs = DEFAULT_JOBS
 
