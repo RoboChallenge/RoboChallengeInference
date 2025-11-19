@@ -1,7 +1,7 @@
 import time
 import logging
 
-def process_job(client, gpu_client, job_id, robot_id, image_size, image_type, action_type, duration, max_wait=600):
+def process_job(client, gpu_client, job_id, robot_id, image_size, image_type, action_type, duration, task_name, max_wait=600):
     """
     Handles the processing of a single job, including status checking, robot starting,
     state polling, inference, and action posting.
@@ -36,6 +36,7 @@ def process_job(client, gpu_client, job_id, robot_id, image_size, image_type, ac
                     if status != "running":
                         break
                     state = client.get_state(image_size, image_type, action_type)
+                    state['task_name'] = task_name
                     if not state:
                         time.sleep(0.5)
                         continue
@@ -84,6 +85,7 @@ def job_loop(client, gpu_client, job_collection_id, image_size, image_type, acti
     while True:
         job_collection = client.get_all_jobs(job_collection_id)
         jobs = job_collection["jobs"]
+        task_name=job_collection['task_name']
 
         has_active_job = False
         exit_code = 0
@@ -112,6 +114,6 @@ def job_loop(client, gpu_client, job_collection_id, image_size, image_type, acti
             status = job["status"]
             logging.info(f"Job id: {job_id}, status: {status}, remaining jobs: {len(jobs)}")
             if status == "ready":
-                process_job(client, gpu_client, job_id, robot_id, image_size, image_type, action_type, duration)
+                process_job(client, gpu_client, job_id, robot_id, image_size, image_type, action_type, duration, task_name)
 
         time.sleep(1)
