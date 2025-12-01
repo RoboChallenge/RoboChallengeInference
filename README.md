@@ -27,7 +27,7 @@ uv run test.py --checkpoint <path_to_your_model_weights>
 ## Run the demo
 If you have registered RoboChallenge and made a submission, run the demo script to start the inference.
 ```bash
-python demo.py --checkpoint <path_to_your_model_weights> --user_token <your_user_token> --run_id <your_run_id>
+uv run demo.py --checkpoint <path_to_your_model_weights> --user_token <your_user_token> --run_id <your_run_id>
 ```
 
 
