@@ -338,16 +338,16 @@ class MockRCRobotFranka(MockRCRobot):
         self.frame_high = next(self.high_images)
 
     def left_get_joint(self):
-        return self.joint + [self.gripper]
+        return self.joint + self.gripper
 
     def right_get_joint(self):
-        return self.joint + [self.gripper]
+        return self.joint + self.gripper
 
     def left_get_pose(self):
-        return self.pose + [self.gripper]
+        return self.pose + self.gripper
 
     def right_get_pose(self):
-        return self.pose + [self.gripper]
+        return self.pose + self.gripper
 
     def get_imgs(self):
         return [
