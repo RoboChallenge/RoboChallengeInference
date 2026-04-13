@@ -2,13 +2,13 @@
 REALSENSE_DEVICE_IDS = None
 
 ROBOT_TAG = 'aloha'
-RECORD_DATA_DIR = '../20250919/pour_fries_into_plate/data/episode_001533'
+RECORD_DATA_DIR = '../20260413/aloha/pack_the_toothbrush_holder'
 
-# ROBOT_TAG = 'arx5'
-# RECORD_DATA_DIR = '../20250919/arrange_paper_cups/data/episode_000772'
+# ROBOT_TAG = 'w1'
+# RECORD_DATA_DIR = '../20260413/w1/sweep_the_trash'
 
 # ROBOT_TAG = 'ur5'
-# RECORD_DATA_DIR = '../20250919/shred_scrap_paper/data/episode_000775'
+# RECORD_DATA_DIR = '../20260413/ur5/arrange_fruits'
 
-# ROBOT_TAG = 'franka'
-# RECORD_DATA_DIR = '../20250919/press_three_buttons/data/episode_FFFFFF'
+# ROBOT_TAG = 'arx5'
+# RECORD_DATA_DIR = '../20260413/arx5/hang_the_cup'

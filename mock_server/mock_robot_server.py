@@ -65,26 +65,41 @@ class FlaskWorker(Thread):
     def get_state(self, width: int = 224, height: int = 224, image_type: List[str] = Query(default=None), action_type: str = None, resize_name: str = None):
         self.action_type = action_type
         image_size = (width, height)
-        if image_size is None or action_type is None:
+        if isinstance(image_type, str):
+            image_type = [image_type]
+        if image_type is None or len(image_type) == 0 or action_type is None:
             state_data = {
-                "state": "size_none"
+                "state": "size_none",
+                "timestamp": time.time()
             }
             return Response(pickle.dumps(state_data), media_type='application/octet-stream')
-        ret_imgs = self.robot_alpha.get_imgs()
+        ret_imgs = self.robot_alpha.get_imgs() or []
         images_dict = {}
-        if resize_name == 'padding':
+        if resize_name in ('wyf', 'padding'):
             resize_method = resize_with_pad_single
         else:
             resize_method = cv2.resize
-        if 'high' in image_type:
-            img_high = resize_method(ret_imgs[2][1], image_size)
-            images_dict['high'] = cv2.imencode('.png', img_high)[-1].tobytes()
-        if 'left_hand' in image_type:
-            img_left = resize_method(ret_imgs[0][1], image_size)
-            images_dict['left_hand'] = cv2.imencode('.png', img_left)[-1].tobytes()
-        if 'right_hand' in image_type:
-            img_right = resize_method(ret_imgs[1][1], image_size)
-            images_dict['right_hand'] = cv2.imencode('.png', img_right)[-1].tobytes()
+
+        left_cams = ['left_hand', 'cam_left_wrist', 'cam_global', 'left_wrist', 'global']
+        right_cams = ['right_hand', 'cam_right_wrist', 'cam_arm', 'right_wrist', 'arm']
+        high_cams = ['high', 'cam_high', 'cam_side', 'side']
+        image_type_set = set(image_type)
+        for high_cam in high_cams:
+            if high_cam in image_type_set and len(ret_imgs) > 2:
+                img_high = resize_method(ret_imgs[2][1], image_size)
+                images_dict[high_cam] = cv2.imencode('.png', img_high)[-1].tobytes()
+                break
+        for left_cam in left_cams:
+            if left_cam in image_type_set and len(ret_imgs) > 0:
+                img_left = resize_method(ret_imgs[0][1], image_size)
+                images_dict[left_cam] = cv2.imencode('.png', img_left)[-1].tobytes()
+                break
+        for right_cam in right_cams:
+            if right_cam in image_type_set and len(ret_imgs) > 1:
+                img_right = resize_method(ret_imgs[1][1], image_size)
+                images_dict[right_cam] = cv2.imencode('.png', img_right)[-1].tobytes()
+                break
+
         if 'left' in action_type:
             if self.robot_alpha.left_get_enable():
                 if 'pos' in action_type:
@@ -129,7 +144,9 @@ class FlaskWorker(Thread):
     def post_action(self, data: dict = Body(...), action_type: str = None):
         try:
             actions = data.get("actions", [])
-            duration = data.get("duration", [])
+            duration = float(data.get("duration", 0.0))
+            if action_type is None:
+                return {'result': "error", 'message': 'action_type is required'}
             for action in actions:
                 if not cmd_Q.full():
                     if 'left' in action_type:
@@ -230,7 +247,7 @@ class RobotWorker(Thread):
                     self.current_position = np.concatenate((action_duration['left_action'], action_duration['right_action']))
                 if last_pos.shape!= self.current_position.shape:
                     last_pos=self.current_position.copy()
-                period = action_duration['duration']
+                period = max(float(action_duration['duration']), 1e-6)
                 velocity = (self.current_position - last_pos) / period
                 if np.abs(velocity).max() > self.velocity_thre:
                     period *= np.abs(velocity[:-1]).max() / self.velocity_thre
@@ -289,11 +306,13 @@ class RobotDashboard:
     def start_motion(self):
         with cmd_Q.mutex:
             cmd_Q.queue.clear()
+        self.robot_alpha._start_record()
 
     def end_motion(self):
         logger.info('end_motion')
         with cmd_Q.mutex:
             cmd_Q.queue.clear()
+        self.robot_alpha._stop_record()
 
     def format_error(self):
         logger.warning('format error, stopping')
@@ -304,5 +323,6 @@ if __name__ == "__main__":
     logger.info('starting server')
     parser = argparse.ArgumentParser(description="Robot Dashboard Arguments")
     parser.add_argument('-s', '--server_port', type=int, default=9098)
+    parser.add_argument('-v', '--velocity_thre', type=float, default=1000000)
     args = parser.parse_args()
-    dashboard = RobotDashboard(server_port=args.server_port)
+    dashboard = RobotDashboard(server_port=args.server_port, velocity_thre=args.velocity_thre)

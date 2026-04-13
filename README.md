@@ -58,10 +58,19 @@ git checkout -b my-feature-branch
 #   Only one pair of ROBOT_TAG and RECORD_DATA_DIR should be active at a time.
 #   Ensure that the RECORD_DATA_DIR path matches the structure of your data folder.
 #   You can find the appropriate ROBOT_TAG in your training data or on our website.
+#   For the 20260413 CVPR package, you can use one of the following pairs:
+#     ROBOT_TAG='aloha', RECORD_DATA_DIR='../20260413/aloha/pack_the_toothbrush_holder'
+#     ROBOT_TAG='w1',    RECORD_DATA_DIR='../20260413/w1/sweep_the_trash'
+#     ROBOT_TAG='ur5',   RECORD_DATA_DIR='../20260413/ur5/arrange_fruits'
+#     ROBOT_TAG='arx5',  RECORD_DATA_DIR='../20260413/arx5/hang_the_cup'
+#   RECORD_DATA_DIR also supports robot-level directory (e.g. '../20260413/ur5').
+#   The mock server will auto-detect the task directory with meta/states/videos.
 # Start the test service
+cd mock_server
 python3 mock_robot_server.py
 # Use test.py for testing; it will automatically invoke the mock interface to help you debug your model
 # Replace {your_args} with the actual parameters you want to test, for example: --checkpoint xxx.
+# Run this in another shell at repo root.
 python3 test.py {your_args}
 ```
 
@@ -125,37 +134,75 @@ None
 |-------------|-------------|----------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | width       | integer     | No       | 224     | Width of the image                                                                                                                                                                                                                                                                                                                                                                                     |
 | height      | integer     | No       | 224     | Height of the image                                                                                                                                                                                                                                                                                                                                                                                    |
-| image_type  | list of str | Yes      | None    | Camera positions; can be one or more of `left_wrist`, `right_wrist`, `high`, `arm`, `global`, `side`                                                                                                                                                                                                                                                                                                   |
+| image_type  | list of str | Yes      | None    | Camera names. Use robot-specific `cam_*` keys listed below (for example, `cam_left_wrist`, `cam_arm`). Returned `images` keys are the requested keys that are valid for that robot.                                                                                                                                                                                                                  |
 | action_type | str         | Yes      | None    | Control mode; must be `joint` or `pos`, and can optionally be concatenated with `left` or `right`. All possible options are `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos`. The value should remain consistent during a job. Usually this is consistent with the parameter in Post Action. See the [Robot specific Notes](#robot-specific-notes) section for detailed information.   |
 
-Additional notes on camera positions:
+Robot-specific `image_type` values and returned `images` keys:
 
-For a dual-arm robot, `left_wrist` and `right_wrist` refer to the cameras mounted on the left and right arms,
-respectively. The `high` camera is positioned above the robot, providing a top-down view of the workspace.
+| Robot | Use this `image_type` | `images` keys returned |
+|-------|------------------------|------------------------|
+| `aloha` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` |
+| `w1` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` |
+| `ur5` | `cam_global`, `cam_arm` | `cam_global`, `cam_arm` |
+| `arx` (`arx5`) | `cam_global`, `cam_arm`, `cam_side` | `cam_global`, `cam_arm`, `cam_side` |
 
-For a single-arm robot, `arm` always refers to the camera mounted on the arms. `global` is on the opposite
-side of the robot, and `side` is on the right side of the robot.
-
-UR5 robots lack cameras on right side. Thus `side` is not available for
-those robots. See the [Robot specific Notes](#robot-specific-notes) section for detailed information.
+Note: for compatibility, some services may also accept aliases like `left_wrist`/`right_wrist`/`high`/`arm`/`global`/`side`.
 
 #### Response Example
 
-The response is a pickle file containing a dictionary with the following structure:
+The response is a pickle file containing a dictionary with the following structure.
+The `images` keys depend on robot type:
+
+- `aloha` / `w1`
+
+```python
+{
+    "images": {
+        "cam_left_wrist": b'PNG',
+        "cam_right_wrist": b'PNG',
+        "cam_high": b'PNG'
+    }
+}
+```
+
+- `ur5`
+
+```python
+{
+    "images": {
+        "cam_global": b'PNG',
+        "cam_arm": b'PNG'
+    }
+}
+```
+
+- `arx` (`arx5`)
+
+```python
+{
+    "images": {
+        "cam_global": b'PNG',
+        "cam_arm": b'PNG',
+        "cam_side": b'PNG'
+    }
+}
+```
+
+Full response example (`aloha`, `action_type=joint`):
 
 ```python
 {
     "state": 'normal',
-    "timestamp": 0.0,
-    "pending_actions": 10,
-    "action": [0.0, 0.0, ..., 0.0],
+    "timestamp": 1774949968.382069,
+    "pending_actions": 0,
+    "action": [
+        -0.0151, 0.0, 0.0, -0.0184, 0.0986, 0.0529, 0.0001,
+         0.0113, 0.0, 0.0, -0.0079, 0.0962, 0.0298, 0.0
+    ],
     "images": {
-        "high": b'PNG',
-        "left_wrist": b'PNG',
-        "right_wrist": b'PNG',
-        "arm": b'PNG',
-        "side": b'PNG',
-        "global": b'PNG'
+        "cam_left_wrist": b'PNG',
+        "cam_right_wrist": b'PNG',
+        "cam_high": b'PNG'
     }
 }
 ```
@@ -169,12 +216,12 @@ The response is a pickle file containing a dictionary with the following structu
 | pending_actions    | integer       | Number of pending actions in the queue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | action             | list of float | Current robot joint or position values. If `action_type` in the request contains `joint`, the joint values will be returned. If it contains `pos`, the tool end positions will be returned. If it contains `left` or `right`, only the values for the left or right arm will be returned. If neither is specified, values for both arms will be returned. For example, if the robot is Aloha with two arm, the list consists with `[joints of left arm, gripper of left arm, joints of right arm, gripper of right arm]`. See the [Robot specific Notes](#robot-specific-notes) section for detailed information. |
 | images             | dict          | Dictionary of images. Only includes camera positions specified in the `image_type` request parameter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| images.high        | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.left_wrist  | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.right_wrist | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.arm         | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.side        | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.global      | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| images.cam_left_wrist  | bytes         | PNG image bytes for `aloha`/`w1`, if requested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| images.cam_right_wrist | bytes         | PNG image bytes for `aloha`/`w1`, if requested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| images.cam_high        | bytes         | PNG image bytes for `aloha`/`w1`, if requested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| images.cam_global      | bytes         | PNG image bytes for `ur5`/`arx`, if requested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| images.cam_arm         | bytes         | PNG image bytes for `ur5`/`arx`, if requested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| images.cam_side        | bytes         | PNG image bytes for `arx`, if requested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 
