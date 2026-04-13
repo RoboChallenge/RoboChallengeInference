@@ -45,7 +45,7 @@ class FlaskWorker(Thread):
         super().__init__()
         self.server_port = server_port
         self.image_size = (224, 224)  # (w,h)
-        # image_type['left_hand','right_hand','high']
+        # image_type['left_wrist','right_wrist','high']
         self.action_type = None  # 'pos','joint','leftpos','rightpos','leftjoint','rightjoint'
         self.robot_alpha = robot_alpha
         self.dashboard_instance = dashboard_instance

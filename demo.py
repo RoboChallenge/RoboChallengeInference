@@ -74,7 +74,7 @@ def main():
 
     # these args are generally not changed during evaluation, so we put them here.
     image_size = [224, 224] # this refers to README.md#get-state request parameter `width` and `height`
-    image_type = ["high", "left_hand", "right_hand"] # this refers to README.md#get-state request parameter `image_type`
+    image_type = ["high", "left_wrist", "right_wrist"] # this refers to README.md#get-state request parameter `image_type`
     action_type = "joint" # this refers to both README.md#get-state and README.md#post-action parameters `action_type`
     duration = 0.05 # this refers to README.md#post-action request parameter `duration`
 

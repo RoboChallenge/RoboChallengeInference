@@ -53,7 +53,7 @@ def main():
     args = parser.parse_args()
     
     image_size = [224, 224]
-    image_type = ["high", "left_hand", "right_hand"]
+    image_type = ["high", "left_wrist", "right_wrist"]
     action_type = "joint"
     duration = 0.05
 

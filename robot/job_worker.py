@@ -12,7 +12,7 @@ def process_job(client, gpu_client, job_id, robot_id, image_size, image_type, ac
         job_id (str): The unique identifier for the job to process.
         robot_id (str): The unique identifier for the robot associated with the job.
         image_size (list): The size of images to request from the robot (e.g., [224, 224]).
-        image_type (list): The types of images to request (e.g., ["high", "left_hand", "right_hand"]).
+        image_type (list): The types of images to request (e.g., ["high", "left_wrist", "right_wrist"]).
         action_type (str): The type of action to perform (e.g., "joint").
         duration (float): The duration for each action command.
         max_wait (int, optional): Maximum time to wait for job completion in seconds. Defaults to 600.
