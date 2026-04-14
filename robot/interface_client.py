@@ -191,6 +191,6 @@ class InterfaceClient:
         Returns:
             list: A list of runs.
         """
-        response = self._get(f"{base_url}/v2/job_collections/{submission_id}/runs", headers={"x-user-id": self.user_id})
+        response = self._get(f"{base_url}/v2/job_collections/submission/{submission_id}/runs", headers={"x-user-id": self.user_id})
         return response.json()
 
