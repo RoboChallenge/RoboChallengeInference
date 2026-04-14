@@ -53,8 +53,13 @@ def main():
     args = parser.parse_args()
     
     image_size = [224, 224]
-    image_type = ["high", "left_wrist", "right_wrist"]
-    action_type = "joint"
+    ## aloha or w1
+    image_type = ["cam_left_wrist", "cam_right_wrist", "cam_high"] # this refers to README.md#get-state request parameter `image_type`
+    ## arx5 
+    # image_type = ["cam_global", "cam_arm", "cam_side"]
+    ## ur5
+    # image_type = ["cam_global", "cam_arm"]
+    action_type = "joint" # this refers to both README.md#get-state and README.md#post-action parameters `action_type`
     duration = 0.05
 
     client = InterfaceClient(DEFAULT_USER_ID,mock=True)

@@ -134,8 +134,8 @@ None
 |-------------|-------------|----------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | width       | integer     | No       | 224     | Width of the image                                                                                                                                                                                                                                                                                                                                                                                     |
 | height      | integer     | No       | 224     | Height of the image                                                                                                                                                                                                                                                                                                                                                                                    |
-| image_type  | list of str | Yes      | None    | Camera names. Use robot-specific `cam_*` keys listed below (for example, `cam_left_wrist`, `cam_arm`). Returned `images` keys are the requested keys that are valid for that robot.                                                                                                                                                                                                                  |
-| action_type | str         | Yes      | None    | Control mode; must be `joint` or `pos`, and can optionally be concatenated with `left` or `right`. All possible options are `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos`. The value should remain consistent during a job. Usually this is consistent with the parameter in Post Action. See the [Robot specific Notes](#robot-specific-notes) section for detailed information.   |
+| image_type  | list of str | Yes      | None    | Camera names. Only robot-specific `cam_*` keys listed below are supported. If you send unsupported keys, server returns `JSONResponse` error with valid options.                                                                                                                                                                                                                                    |
+| action_type | str         | Yes      | None    | Control mode. Only robot-specific values listed below are supported. If you send unsupported values, server returns `JSONResponse` error with valid options.                                                                                                                                                                                                                                          |
 
 Robot-specific `image_type` values and returned `images` keys:
 
@@ -144,9 +144,16 @@ Robot-specific `image_type` values and returned `images` keys:
 | `aloha` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` |
 | `w1` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` | `cam_left_wrist`, `cam_right_wrist`, `cam_high` |
 | `ur5` | `cam_global`, `cam_arm` | `cam_global`, `cam_arm` |
-| `arx` (`arx5`) | `cam_global`, `cam_arm`, `cam_side` | `cam_global`, `cam_arm`, `cam_side` |
+| `arx5` | `cam_global`, `cam_arm`, `cam_side` | `cam_global`, `cam_arm`, `cam_side` |
 
-Note: for compatibility, some services may also accept aliases like `left_wrist`/`right_wrist`/`high`/`arm`/`global`/`side`.
+Robot-specific `action_type` values:
+
+| Robot | Supported `action_type` |
+|-------|--------------------------|
+| `aloha` | `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos` |
+| `w1` | `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos` |
+| `ur5` | `leftjoint`, `leftpos` |
+| `arx5` | `leftjoint`, `leftpos` |
 
 #### Response Example
 
@@ -234,7 +241,7 @@ Full response example (`aloha`, `action_type=joint`):
 
 | Parameter   | Type | Required | Default | Description                                                                                                                                                                                                                                       |
 |-------------|------|----------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| action_type | str  | Yes      | None    | Control mode. All possible options are `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos`. The value should remain consistent during a job. See the [Robot specific Notes](#robot-specific-notes) section for detailed information. |
+| action_type | str  | Yes      | None    | Control mode. Only robot-specific values listed above are supported. If you send unsupported values, server returns `JSONResponse` error with valid options. |
 
 The HTTP body should be a JSON object with the following structure:
 

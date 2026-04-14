@@ -41,11 +41,32 @@ def make_jsonable(obj):
 
 
 class FlaskWorker(Thread):
+    ROBOT_IMAGE_TYPES = {
+        "aloha": ["cam_left_wrist", "cam_right_wrist", "cam_high"],
+        "w1": ["cam_left_wrist", "cam_right_wrist", "cam_high"],
+        "ur5": ["cam_global", "cam_arm"],
+        "arx5": ["cam_global", "cam_arm", "cam_side"],
+    }
+
+    ROBOT_IMAGE_INDEX = {
+        "aloha": {"cam_left_wrist": 0, "cam_right_wrist": 1, "cam_high": 2},
+        "w1": {"cam_left_wrist": 0, "cam_right_wrist": 1, "cam_high": 2},
+        "ur5": {"cam_global": 0, "cam_arm": 1},
+        "arx5": {"cam_global": 0, "cam_arm": 1, "cam_side": 2},
+    }
+
+    ROBOT_ACTION_TYPES = {
+        "aloha": ["joint", "pos", "leftjoint", "leftpos", "rightjoint", "rightpos"],
+        "w1": ["joint", "pos", "leftjoint", "leftpos", "rightjoint", "rightpos"],
+        "ur5": ["leftjoint", "leftpos"],
+        "arx5": ["leftjoint", "leftpos"],
+    }
+
     def __init__(self, server_port, robot_alpha: MockRCRobot, dashboard_instance: 'RobotDashboard'):
         super().__init__()
         self.server_port = server_port
         self.image_size = (224, 224)  # (w,h)
-        # image_type['left_wrist','right_wrist','high']
+        # image_type['cam_left_wrist','cam_right_wrist','cam_high']
         self.action_type = None  # 'pos','joint','leftpos','rightpos','leftjoint','rightjoint'
         self.robot_alpha = robot_alpha
         self.dashboard_instance = dashboard_instance
@@ -62,6 +83,17 @@ class FlaskWorker(Thread):
         t2 = time.time()
         return {'timestamp': t2}
 
+    def _resolve_robot_type(self) -> str | None:
+        robot_tag = getattr(self.robot_alpha, "robot_tag", None)
+        if hasattr(robot_tag, "value"):
+            robot_tag = robot_tag.value
+        if robot_tag is None:
+            return None
+        robot_type = str(robot_tag).lower()
+        if robot_type == "arx":
+            robot_type = "arx5"
+        return robot_type
+
     def get_state(self, width: int = 224, height: int = 224, image_type: List[str] = Query(default=None), action_type: str = None, resize_name: str = None):
         self.action_type = action_type
         image_size = (width, height)
@@ -73,32 +105,66 @@ class FlaskWorker(Thread):
                 "timestamp": time.time()
             }
             return Response(pickle.dumps(state_data), media_type='application/octet-stream')
+
+        robot_type = self._resolve_robot_type()
+        if robot_type not in self.ROBOT_IMAGE_TYPES:
+            return JSONResponse(
+                {
+                    "result": "error",
+                    "message": f"unsupported robot type: {robot_type}",
+                    "available_robot_types": sorted(self.ROBOT_IMAGE_TYPES.keys()),
+                },
+                status_code=400,
+            )
+
+        valid_action_types = self.ROBOT_ACTION_TYPES[robot_type]
+        if action_type not in valid_action_types:
+            return JSONResponse(
+                {
+                    "result": "error",
+                    "message": f"invalid action_type for robot '{robot_type}'",
+                    "invalid_action_type": action_type,
+                    "available_action_type": valid_action_types,
+                },
+                status_code=400,
+            )
+
+        valid_image_types = self.ROBOT_IMAGE_TYPES[robot_type]
+        invalid_image_types = sorted({image_name for image_name in image_type if image_name not in valid_image_types})
+        if invalid_image_types:
+            return JSONResponse(
+                {
+                    "result": "error",
+                    "message": f"invalid image_type for robot '{robot_type}'",
+                    "invalid_image_type": invalid_image_types,
+                    "available_image_type": valid_image_types,
+                },
+                status_code=400,
+            )
+
         ret_imgs = self.robot_alpha.get_imgs() or []
         images_dict = {}
-        if resize_name in ('wyf', 'padding'):
+        if resize_name == 'padding':
             resize_method = resize_with_pad_single
         else:
             resize_method = cv2.resize
 
-        left_cams = ['left_hand', 'cam_left_wrist', 'cam_global', 'left_wrist', 'global']
-        right_cams = ['right_hand', 'cam_right_wrist', 'cam_arm', 'right_wrist', 'arm']
-        high_cams = ['high', 'cam_high', 'cam_side', 'side']
-        image_type_set = set(image_type)
-        for high_cam in high_cams:
-            if high_cam in image_type_set and len(ret_imgs) > 2:
-                img_high = resize_method(ret_imgs[2][1], image_size)
-                images_dict[high_cam] = cv2.imencode('.png', img_high)[-1].tobytes()
-                break
-        for left_cam in left_cams:
-            if left_cam in image_type_set and len(ret_imgs) > 0:
-                img_left = resize_method(ret_imgs[0][1], image_size)
-                images_dict[left_cam] = cv2.imencode('.png', img_left)[-1].tobytes()
-                break
-        for right_cam in right_cams:
-            if right_cam in image_type_set and len(ret_imgs) > 1:
-                img_right = resize_method(ret_imgs[1][1], image_size)
-                images_dict[right_cam] = cv2.imencode('.png', img_right)[-1].tobytes()
-                break
+        camera_index_map = self.ROBOT_IMAGE_INDEX[robot_type]
+        for image_name in image_type:
+            if image_name in images_dict:
+                continue
+            image_idx = camera_index_map[image_name]
+            if image_idx >= len(ret_imgs) or ret_imgs[image_idx][1] is None:
+                return JSONResponse(
+                    {
+                        "result": "error",
+                        "message": f"camera frame unavailable: {image_name}",
+                        "available_image_type": valid_image_types,
+                    },
+                    status_code=503,
+                )
+            image_data = resize_method(ret_imgs[image_idx][1], image_size)
+            images_dict[image_name] = cv2.imencode('.png', image_data)[-1].tobytes()
 
         if 'left' in action_type:
             if self.robot_alpha.left_get_enable():
@@ -145,8 +211,29 @@ class FlaskWorker(Thread):
         try:
             actions = data.get("actions", [])
             duration = float(data.get("duration", 0.0))
-            if action_type is None:
-                return {'result': "error", 'message': 'action_type is required'}
+            robot_type = self._resolve_robot_type()
+            if robot_type not in self.ROBOT_ACTION_TYPES:
+                return JSONResponse(
+                    {
+                        "result": "error",
+                        "message": f"unsupported robot type: {robot_type}",
+                        "available_robot_types": sorted(self.ROBOT_ACTION_TYPES.keys()),
+                    },
+                    status_code=400,
+                )
+
+            valid_action_types = self.ROBOT_ACTION_TYPES[robot_type]
+            if action_type not in valid_action_types:
+                return JSONResponse(
+                    {
+                        "result": "error",
+                        "message": f"invalid action_type for robot '{robot_type}'",
+                        "invalid_action_type": action_type,
+                        "available_action_type": valid_action_types,
+                    },
+                    status_code=400,
+                )
+
             for action in actions:
                 if not cmd_Q.full():
                     if 'left' in action_type:

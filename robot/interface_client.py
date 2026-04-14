@@ -45,6 +45,14 @@ class InterfaceClient:
         def inner():
             return self.session.put(url, **kwargs)
         return inner()
+
+    @staticmethod
+    def _print_response_error(prefix: str, error: requests.exceptions.RequestException):
+        response = getattr(error, "response", None)
+        if response is None:
+            print(prefix)
+            return
+        print(f"{prefix} status={response.status_code} body={response.text}")
     
     def update_job_info(self, job_id, robot_id):
         self.job_id = job_id
@@ -102,7 +110,7 @@ class InterfaceClient:
                 print("test state:", data)
             return data
         except requests.exceptions.RequestException as e:
-            print(f"Error getting state: {e}")
+            self._print_response_error(f"Error getting state: {e}", e)
             return None
         
     def start_motion(self):
@@ -130,9 +138,10 @@ class InterfaceClient:
                     break
                 else:
                     print(f"Robot failed to process actions: {response.json().get('message')}")
+                    print(f"Robot action response body: {response.text}")
             except requests.exceptions.RequestException as e:
                 i += 1
-                print(f"Error posting actions: {e}")
+                self._print_response_error(f"Error posting actions: {e}", e)
 
     def start_robot(self, job_id):
         url = f"{base_url}/jobs/update"
