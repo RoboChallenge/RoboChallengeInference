@@ -41,27 +41,6 @@ def make_jsonable(obj):
 
 
 class FlaskWorker(Thread):
-    ROBOT_IMAGE_TYPES = {
-        "aloha": ["cam_left_wrist", "cam_right_wrist", "cam_high"],
-        "w1": ["cam_left_wrist", "cam_right_wrist", "cam_high"],
-        "ur5": ["cam_global", "cam_arm"],
-        "arx5": ["cam_global", "cam_arm", "cam_side"],
-    }
-
-    ROBOT_IMAGE_INDEX = {
-        "aloha": {"cam_left_wrist": 0, "cam_right_wrist": 1, "cam_high": 2},
-        "w1": {"cam_left_wrist": 0, "cam_right_wrist": 1, "cam_high": 2},
-        "ur5": {"cam_global": 0, "cam_arm": 1},
-        "arx5": {"cam_global": 0, "cam_arm": 1, "cam_side": 2},
-    }
-
-    ROBOT_ACTION_TYPES = {
-        "aloha": ["joint", "pos", "leftjoint", "leftpos", "rightjoint", "rightpos"],
-        "w1": ["joint", "pos", "leftjoint", "leftpos", "rightjoint", "rightpos"],
-        "ur5": ["leftjoint", "leftpos"],
-        "arx5": ["leftjoint", "leftpos"],
-    }
-
     def __init__(self, server_port, robot_alpha: MockRCRobot, dashboard_instance: 'RobotDashboard'):
         super().__init__()
         self.server_port = server_port
@@ -83,16 +62,44 @@ class FlaskWorker(Thread):
         t2 = time.time()
         return {'timestamp': t2}
 
-    def _resolve_robot_type(self) -> str | None:
-        robot_tag = getattr(self.robot_alpha, "robot_tag", None)
-        if hasattr(robot_tag, "value"):
-            robot_tag = robot_tag.value
-        if robot_tag is None:
-            return None
-        robot_type = str(robot_tag).lower()
-        if robot_type == "arx":
-            robot_type = "arx5"
-        return robot_type
+    def _resolve_robot_schema(self):
+        robot_impl = self.robot_alpha
+        if not isinstance(robot_impl, MockRCRobot):
+            return JSONResponse(
+                {
+                    "result": "error",
+                    "message": "invalid robot implementation",
+                    "robot_class": type(robot_impl).__name__,
+                    "available_robot_types": MockRCRobot.available_robot_types(),
+                },
+                status_code=500,
+            )
+        try:
+            return robot_impl.schema()
+        except ValueError as exc:
+            return JSONResponse(
+                {
+                    "result": "error",
+                    "message": "invalid robot schema declaration",
+                    "robot_tag": str(getattr(robot_impl, "robot_tag", None)),
+                    "robot_class": type(robot_impl).__name__,
+                    "available_robot_types": MockRCRobot.available_robot_types(),
+                    "detail": str(exc),
+                },
+                status_code=500,
+            )
+        except Exception as exc:
+            logger.exception(f"failed to resolve robot schema: {exc}")
+            return JSONResponse(
+                {
+                    "result": "error",
+                    "message": "failed to resolve robot schema",
+                    "robot_tag": str(getattr(robot_impl, "robot_tag", None)),
+                    "robot_class": type(robot_impl).__name__,
+                    "detail": str(exc),
+                },
+                status_code=500,
+            )
 
     def get_state(self, width: int = 224, height: int = 224, image_type: List[str] = Query(default=None), action_type: str = None, resize_name: str = None):
         self.action_type = action_type
@@ -106,18 +113,12 @@ class FlaskWorker(Thread):
             }
             return Response(pickle.dumps(state_data), media_type='application/octet-stream')
 
-        robot_type = self._resolve_robot_type()
-        if robot_type not in self.ROBOT_IMAGE_TYPES:
-            return JSONResponse(
-                {
-                    "result": "error",
-                    "message": f"unsupported robot type: {robot_type}",
-                    "available_robot_types": sorted(self.ROBOT_IMAGE_TYPES.keys()),
-                },
-                status_code=400,
-            )
+        schema = self._resolve_robot_schema()
+        if isinstance(schema, JSONResponse):
+            return schema
 
-        valid_action_types = self.ROBOT_ACTION_TYPES[robot_type]
+        robot_type = schema["robot_type"]
+        valid_action_types = schema["available_action_type"]
         if action_type not in valid_action_types:
             return JSONResponse(
                 {
@@ -129,7 +130,7 @@ class FlaskWorker(Thread):
                 status_code=400,
             )
 
-        valid_image_types = self.ROBOT_IMAGE_TYPES[robot_type]
+        valid_image_types = schema["available_image_type"]
         invalid_image_types = sorted({image_name for image_name in image_type if image_name not in valid_image_types})
         if invalid_image_types:
             return JSONResponse(
@@ -149,7 +150,7 @@ class FlaskWorker(Thread):
         else:
             resize_method = cv2.resize
 
-        camera_index_map = self.ROBOT_IMAGE_INDEX[robot_type]
+        camera_index_map = schema["image_index"]
         for image_name in image_type:
             if image_name in images_dict:
                 continue
@@ -211,18 +212,12 @@ class FlaskWorker(Thread):
         try:
             actions = data.get("actions", [])
             duration = float(data.get("duration", 0.0))
-            robot_type = self._resolve_robot_type()
-            if robot_type not in self.ROBOT_ACTION_TYPES:
-                return JSONResponse(
-                    {
-                        "result": "error",
-                        "message": f"unsupported robot type: {robot_type}",
-                        "available_robot_types": sorted(self.ROBOT_ACTION_TYPES.keys()),
-                    },
-                    status_code=400,
-                )
+            schema = self._resolve_robot_schema()
+            if isinstance(schema, JSONResponse):
+                return schema
 
-            valid_action_types = self.ROBOT_ACTION_TYPES[robot_type]
+            robot_type = schema["robot_type"]
+            valid_action_types = schema["available_action_type"]
             if action_type not in valid_action_types:
                 return JSONResponse(
                     {

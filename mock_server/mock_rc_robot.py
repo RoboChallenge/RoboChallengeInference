@@ -5,7 +5,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from threading import Thread
-from typing import Any
+from typing import Any, ClassVar
 
 import cv2
 
@@ -21,6 +21,9 @@ class MockRCRobot(ABC):
     robot_alpha: Any
     filler_thread: Thread
     frame_interval = 1 / 30
+    ROBOT_TYPE: ClassVar[str | None] = None
+    IMAGE_TYPES: ClassVar[tuple[str, ...]] = ()
+    ACTION_TYPES: ClassVar[tuple[str, ...]] = ()
 
     @property
     @abstractmethod
@@ -32,11 +35,77 @@ class MockRCRobot(ABC):
     def pos_num(self):
         raise NotImplemented('no pose number defined')
 
+    @classmethod
+    def _iter_subclasses(cls):
+        for subclass in cls.__subclasses__():
+            yield subclass
+            yield from subclass._iter_subclasses()
+
+    @classmethod
+    def available_robot_types(cls) -> list[str]:
+        robot_types = []
+        for subclass in cls._iter_subclasses():
+            robot_type = getattr(subclass, "ROBOT_TYPE", None)
+            if robot_type:
+                robot_types.append(robot_type)
+        return sorted(set(robot_types))
+
+    @property
+    def robot_type(self) -> str:
+        if not self.ROBOT_TYPE:
+            raise RuntimeError(f'{type(self).__name__} has no ROBOT_TYPE')
+        return self.ROBOT_TYPE
+
+    @property
+    def image_types(self) -> list[str]:
+        if not self.IMAGE_TYPES:
+            raise RuntimeError(f'{type(self).__name__} has no IMAGE_TYPES')
+        return list(self.IMAGE_TYPES)
+
+    @property
+    def action_types(self) -> list[str]:
+        if not self.ACTION_TYPES:
+            raise RuntimeError(f'{type(self).__name__} has no ACTION_TYPES')
+        return list(self.ACTION_TYPES)
+
+    @property
+    def image_index(self) -> dict[str, int]:
+        return {image_name: idx for idx, image_name in enumerate(self.image_types)}
+
+    def schema(self) -> dict[str, Any]:
+        robot_type = self.robot_type
+        image_types = self.image_types
+        action_types = self.action_types
+        image_index = self.image_index
+
+        if len(image_types) != len(set(image_types)):
+            raise ValueError(f'{type(self).__name__} has duplicated IMAGE_TYPES: {image_types}')
+        if not action_types:
+            raise ValueError(f'{type(self).__name__} has empty ACTION_TYPES')
+        expected_index = list(range(len(image_types)))
+        if sorted(image_index.values()) != expected_index:
+            raise ValueError(
+                f'{type(self).__name__} image_index is invalid: {image_index}, expected indices: {expected_index}'
+            )
+        if set(image_index.keys()) != set(image_types):
+            raise ValueError(
+                f'{type(self).__name__} image_index keys mismatch, image_types={image_types}, image_index={image_index}'
+            )
+
+        return {
+            "robot_type": robot_type,
+            "available_image_type": image_types,
+            "available_action_type": action_types,
+            "image_index": image_index,
+        }
+
     @staticmethod
     def create_robot(robot_tag: RobotTag | str, realsense_ids, record_data_dir) -> 'MockRCRobot':
         robot_tag = RobotTag(robot_tag)
-        if robot_tag in (RobotTag.ALOHA, RobotTag.W1):
+        if robot_tag == RobotTag.ALOHA:
             return MockRCRobotAloha(robot_tag, realsense_ids, record_data_dir)
+        if robot_tag == RobotTag.W1:
+            return MockRCRobotW1(robot_tag, realsense_ids, record_data_dir)
         if robot_tag == RobotTag.ARX5:
             return MockRCRobotArx5(robot_tag, realsense_ids, record_data_dir)
         if robot_tag == RobotTag.UR5:
@@ -157,6 +226,10 @@ class MockRCRobot(ABC):
 
 
 class MockRCRobotAloha(MockRCRobot):
+    ROBOT_TYPE = "aloha"
+    IMAGE_TYPES = ("cam_left_wrist", "cam_right_wrist", "cam_high")
+    ACTION_TYPES = ("joint", "pos", "leftjoint", "leftpos", "rightjoint", "rightpos")
+
     @property
     def dof_num(self):
         return 6
@@ -221,7 +294,17 @@ class MockRCRobotAloha(MockRCRobot):
         pass
 
 
+class MockRCRobotW1(MockRCRobotAloha):
+    ROBOT_TYPE = "w1"
+    IMAGE_TYPES = ("cam_left_wrist", "cam_right_wrist", "cam_high")
+    ACTION_TYPES = ("joint", "pos", "leftjoint", "leftpos", "rightjoint", "rightpos")
+
+
 class MockRCRobotArx5(MockRCRobot):
+    ROBOT_TYPE = "arx5"
+    IMAGE_TYPES = ("cam_global", "cam_arm", "cam_side")
+    ACTION_TYPES = ("leftjoint", "leftpos")
+
     @property
     def dof_num(self):
         return 6
@@ -276,6 +359,10 @@ class MockRCRobotArx5(MockRCRobot):
 
 
 class MockRCRobotUr5(MockRCRobot):
+    ROBOT_TYPE = "ur5"
+    IMAGE_TYPES = ("cam_global", "cam_arm")
+    ACTION_TYPES = ("leftjoint", "leftpos")
+
     @property
     def dof_num(self):
         return 6
