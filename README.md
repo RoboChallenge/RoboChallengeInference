@@ -48,6 +48,7 @@ pip install -r requirements.txt
 # Checkout
 git checkout -b my-feature-branch
 # Follow the instructions in demo.py to modify parameters and implement your custom inference logic based on DummyPolicy.
+# The current task prompt will be passed into `DummyPolicy.run_policy(input_data, prompt=...)`.
 ```
 
 ### 3. Test
@@ -79,12 +80,18 @@ python3 test.py {your_args}
 - Log in to RoboChallenge Web
 - Submit an evaluation request
 - On the "My Submission" page, you can view your submissions. Click "Detail" to see more information about a submission.
-- The Run ID displayed on the details page will be required for the evaluation process.
+- The Submission ID displayed on the details page will be required for the evaluation process. The program will automatically poll and select active runs under that submission.
 
 ### 5. Execute
 
 - Wait for a notification (on the website or via email) indicating that your task has been assigned.
 - Ensure the modified code from the previous steps is actively running during the assigned period.
+- Start the evaluation worker with:
+
+```bash
+python3 demo.py --user_token <your_user_token> --submission_id <your_submission_id> --checkpoint <your_checkpoint>
+```
+
 - After the task is completed, the program will exit normally. If you encounter any issues or exceptions, please feel
   free to contact us.
 

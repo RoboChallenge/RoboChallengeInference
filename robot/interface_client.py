@@ -182,3 +182,15 @@ class InterfaceClient:
     def get_all_jobs(self,job_collection_id):
         response = self._get(f"{base_url}/job_collections/{job_collection_id}", headers={"x-user-id": self.user_id})
         return response.json()
+    
+    def get_all_runs(self, submission_id):
+        """
+        Get all runs for a submission.
+        Args:
+            submission_id (str): The unique identifier for the submission to monitor.
+        Returns:
+            list: A list of runs.
+        """
+        response = self._get(f"{base_url}/v2/job_collections/{submission_id}/runs", headers={"x-user-id": self.user_id})
+        return response.json()
+

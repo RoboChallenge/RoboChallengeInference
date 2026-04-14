@@ -25,11 +25,12 @@ class DummyPolicy:
         """
         pass  # TODO: Load your model here using the checkpoint_path
 
-    def run_policy(self, input_data):
+    def run_policy(self, input_data, prompt=None):
         """
         Run inference using the policy/model.
         Args:
             input_data: Input data for inference.
+            prompt (str, optional): Task prompt for the current run.
         Returns:
             list: Inference results.
         """
@@ -50,15 +51,16 @@ class GPUClient:
         """
         self.policy = policy
 
-    def infer(self, state):
+    def infer(self, state, prompt=None):
         """
         Main entry point for inference.
         Args:
             state: Input state for the policy. Refer to README.md#get-state response example for details. It's unpickled and passed as a dict here.
+            prompt (str, optional): Task prompt for the current run.
         Returns:
             list: Inference results from the policy. Refer to README.md#post-action request parameters for details. This will be the `actions` field in the request.
         """
-        result = self.policy.run_policy(state)
+        result = self.policy.run_policy(state, prompt=prompt)
         return result
 
 
@@ -66,7 +68,8 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--user_token', type=str, required=True, help='User token')
-    parser.add_argument('--run_id', type=str, required=True, help='Run ID. Get it from the detail page of your submission')
+    # parser.add_argument('--run_id', type=str, required=True, help='Run ID. Get it from the detail page of your submission')
+    parser.add_argument('--submission_id', type=str, required=True, help='Submission ID. Get it from the detail page of your submission')
     parser.add_argument('--checkpoint', type=str, required=True, help='Checkpoint path')
     # you can modify or add your own parameters
 
@@ -83,7 +86,7 @@ def main():
     gpu_client = GPUClient(policy)  # add your own parameters
 
     # main job loop. This function monitors when jobs are ready to eval and do the evaluation
-    job_loop(client, gpu_client, args.run_id, image_size, image_type, action_type, duration)
+    job_loop(client, gpu_client, args.submission_id, image_size, image_type, action_type, duration)
 
 
 if __name__ == '__main__':
