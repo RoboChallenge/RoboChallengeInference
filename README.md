@@ -1,3 +1,127 @@
+
+# CVPR Pi0.5 Multi-Task Example
+
+This branch is a **CVPR on-robot inference example** for **Pi0.5 multi-task** policies. There is **one checkpoint per robot platform**; you can evaluate **all tasks** supported on that platform with the **same model**, by changing the **task prompt** (and episode data) only. Supported robot types in this codebase (see `demo.py` / `test.py`): `dosw`, `aloha`, `arx5`, `ur5`. 
+
+Core entrypoints:
+
+- **`test.py`** — Connects to the local **mock robot server** for quick debugging.
+- **`demo.py`** — **RoboChallenge** official evaluation (requires `user_token` and `submission_id`).
+
+
+## Quick start
+
+### 1. Installation
+
+```bash
+uv venv
+source .venv/bin/activate   # if your uv venv uses another path, activate that instead
+uv pip install -e ./openpi
+uv pip install pytest
+uv pip install -r requirements.txt
+```
+
+### 2. Download the example model
+
+Download the **Pi0.5 multi-task** checkpoint from [RoboChallenge on Hugging Face](https://huggingface.co/RoboChallenge/models). **One checkpoint per embodiment** covers **all tasks** on that robot; switch tasks via `--prompt` only.
+
+| Platform |`robot_type` (in `test.py` / `demo.py`) | model_name | Mock `ROBOT_TAG` (mock test section) |
+|----------|--------------------------------------------|-----------------------------|---------------------------|
+| W1 | `dosw` | `table30v2_multitask_baseline_w1` | `w1` |
+| Aloha | `aloha` | `table30v2_multitask_baseline_aloha` | `aloha` |
+| ARX5 | `arx5` | `table30v2_multitask_baseline_arx5` | `arx5` |
+| UR5 | `ur5` | `table30v2_multitask_baseline_ur5` | `ur5` |
+
+
+### 3. Run the mock test
+
+1. Edit `mock_server/mock_settings.py`: set **`ROBOT_TAG`** and **`RECORD_DATA_DIR`** (only one active pair). With the bundled sample data (paths relative to repo root):
+
+   - `ROBOT_TAG='aloha'`, `RECORD_DATA_DIR='../20260413/aloha/pack_the_toothbrush_holder'`
+   - `ROBOT_TAG='w1'`, `RECORD_DATA_DIR='../20260413/w1/sweep_the_trash'` → run **`test.py` with `--robot_type dosw`**
+   - `ROBOT_TAG='ur5'`, `RECORD_DATA_DIR='../20260413/ur5/arrange_fruits'`
+   - `ROBOT_TAG='arx5'`, `RECORD_DATA_DIR='../20260413/arx5/hang_the_cup'`
+
+2. Terminal 1 — start the mock server:
+
+    ```bash
+    cd mock_server
+    python3 mock_robot_server.py
+    ```
+
+3. Terminal 2 — from the repo root:
+
+    ```bash
+    python3 test.py \
+      --checkpoint /path/to/checkpoint_dir \
+      --prompt "task instruction in natural language(match the format used in training)" \
+      --robot_type dosw
+    ```
+
+    Use exactly one of `--robot_type dosw | aloha | arx5 | ur5` so it matches `ROBOT_TAG`.
+
+    Adjust `--action_type`, `--duration`, `--image_size`, etc. as needed (see `test.py`).
+
+### 4. Run the demo
+
+After you have a submission and are in the assigned evaluation window, run **`demo.py`**.
+
+
+**W1**
+
+```bash
+python3 demo.py \
+  --user_token <your_user_token> \
+  --submission_id <your_submission_id> \
+  --checkpoint /path/to/w1_checkpoint_dir \
+  --prompt "task instruction in natural language(match the format used in training)" \
+  --action_type joint \
+  --image_size "640x480" \
+  --robot_type dosw
+```
+
+**Aloha**
+
+```bash
+python3 demo.py \
+  --user_token <your_user_token> \
+  --submission_id <your_submission_id> \
+  --checkpoint /path/to/aloha_checkpoint_dir \
+  --prompt "task instruction in natural language(match the format used in training)" \
+  --action_type joint \
+  --image_size "640x480" \
+  --robot_type aloha
+```
+
+**ARX5**
+
+```bash
+python3 demo.py \
+  --user_token <your_user_token> \
+  --submission_id <your_submission_id> \
+  --checkpoint /path/to/arx5_checkpoint_dir \
+  --prompt "task instruction in natural language(match the format used in training)" \
+  --action_type leftjoint \
+  --image_size "1280x720" \
+  --robot_type arx5
+```
+
+**UR5**
+
+```bash
+python3 demo.py \
+  --user_token <your_user_token> \
+  --submission_id <your_submission_id> \
+  --checkpoint /path/to/ur5_checkpoint_dir \
+  --prompt "task instruction in natural language(match the format used in training)" \
+  --action_type leftjoint \
+  --image_size "640x480" \
+  --robot_type ur5
+```
+
+
+# Original README.md
+
 # RoboChallengeInference
 
 ## Project Structure
