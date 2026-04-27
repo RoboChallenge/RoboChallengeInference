@@ -3,7 +3,10 @@ import functools
 import time
 from datetime import datetime
 from utils.enums import ReturnCode
+import subprocess
 import requests
+
+
 
 def timeout(seconds):
     def decorator(func):
@@ -30,6 +33,7 @@ def timeout(seconds):
         return wrapper
     return decorator
 
+
 class RobotController:
     @timeout(5)
     def wait_for_robot_running(self, poll_interval=2):
@@ -37,6 +41,16 @@ class RobotController:
             time.sleep(poll_interval)
             print('now: ', datetime.now())
             raise Exception(f"Function '{__name__}' timed out after {poll_interval} seconds.")
+
+
+def worker():
+    print("Worker started")
+    for _ in range(3):
+        print("Worker running")
+        time.sleep(1)
+    # do some work
+    print("Worker finished")
+
 
 def retry_request(retries=3, delay=1):
     def decorator(func):
@@ -49,6 +63,7 @@ def retry_request(retries=3, delay=1):
                     last_exception = e
                     if attempt < retries - 1:
                         time.sleep(delay)
+            # 最后一次失败抛出异常
             raise last_exception
         return wrapper
     return decorator

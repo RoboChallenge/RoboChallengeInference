@@ -1,0 +1,23 @@
+22er:
+  "0": ["ENONE Juice"]
+  "1": ["Itoen Barley Tea"]
+  "2": ["ENONE Sparkling Water"]
+  "3": ["7UP"]
+  "4": ["Mirinda"]
+  "5": ["Coconut Water"]
+  "6": ["Coca-Cola"]
+  "7": ["Minute Maid Juice"]
+  "8": ["Tropicana"]
+  "9": ["Pepsi"]
+
+22et:
+  "0": ["Huayang Soda", "ENONE Sparkling Water"]
+  "1": ["JDB Herbal Tea", "Aojiru"]
+  "2": ["Huayang Soda", "Frozen Pear Drink"]
+  "3": ["Schweppes Vitamin C", "Schweppes Vitamin C"]
+  "4": ["Tropicana", "7UP"]
+  "5": ["Weichuan Daily C", "Coca-Cola"]
+  "6": ["Tropicana", "Coca-Cola"]
+  "7": ["Weichuan Daily C", "Frozen Pear Drink"]
+  "8": ["Frozen Pear Drink", "ENONE Juice"]
+  "9": ["Pepsi", "Mirinda"]

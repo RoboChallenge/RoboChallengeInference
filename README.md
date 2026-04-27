@@ -1,27 +1,28 @@
-# RoboChallengeInference
+# RoboChallengeInference — G2
+
+Offline inference code for the **G2** dual-arm humanoid: poll Arena jobs, read robot state, run your policy, and stream actions back to the real robot (or a local mock).
 
 ## Project Structure
 
 ```
-- RoboChallengeInference/
-    - README.md
-    - requirements.txt
-    - demo.py
-    - test.py  # Main test entry script
-    - robot/
-        - __init__.py
-        - interface_client.py
-        - job_worker.py
-    - mock_server
-        - mock_rc_robot.py
-        - mock_robot_server.py
-        - mock_settings.py
-        - utils.py
-    - utils/
-        - __init__.py
-        - enums.py
-        - log.py
-        - util.py
+RoboChallengeInference-G2/
+├── README.md
+├── requirements.txt
+├── demo.py                 # Official evaluation: Arena job_loop + your policy
+├── test.py                 # Local loop against mock (no job collection)
+├── robot/
+│   ├── config.yaml         # task_id → slot index → target object name(s)
+│   ├── __init__.py
+│   ├── interface_client.py # HTTP client to Arena + robot
+│   └── job_worker.py       # job_loop, process_job
+├── mock_server/
+│   ├── mock_server.py      # FastAPI mock of robot direct API
+│   └── utils.py
+└── utils/
+    ├── __init__.py
+    ├── enums.py
+    ├── log.py
+    └── util.py
 ```
 
 ## User Guide
@@ -29,69 +30,98 @@
 ### 1. Installation
 
 ```bash
-# Clone the repository and checkout the specified branch
-git clone https://github.com/RoboChallenge/RoboChallengeInference.git
-cd RoboChallengeInference
+git clone <this-repository-url>
+cd RoboChallengeInference-G2
 
-# (Recommended) Create and activate a virtual environment to avoid polluting your global Python environment
+# (Recommended) Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
-
 ```
 
-### 2. Checkout & Modification
+### 2. Implement your policy
+
+- Edit `demo.py`: replace `DummyPolicy` with your model (load weights in `__init__`, run inference in `run_policy(state, prompt)`).
+- `GPUClient` builds a language prompt from `target_objects` (see `robot/config.yaml` and `_process_prompt`).
+- Default cameras are `G2_CAMERAS` in `demo.py` (`kHeadColor`, `kHandLeftColor`, `kHandRightColor`); you can change resolution via `job_loop` arguments.
+
+### 3. Target mapping (`robot/config.yaml`)
+
+`job_loop` loads `robot/config.yaml` at startup. The Arena job API returns a **`task_id`** and a per-task **`index`**. The YAML file maps them to the **list of product names** passed to `GPUClient.infer()`.
+
+- Top-level keys = `task_id` values returned by the platform (e.g. `22er`, `22et`).
+- Second-level keys = **string** indices `"0"` … `"9"` (JSON may send integers; the code uses `str(index)` when looking up).
+- Values = a list of one or two product name strings, matching the task type (single or dual object).
+
+**Run processes from the repository root** so the path `robot/config.yaml` resolves. Keep task keys in sync with the tasks you register on the platform.
+
+### 4. Local test (mock)
 
 ```bash
-# Checkout
-git checkout -b my-feature-branch
-# Follow the instructions in demo.py to modify parameters and implement your custom inference logic based on DummyPolicy.
+# Terminal 1: mock robot API (default: http://127.0.0.1:9098 when using mock in InterfaceClient)
+python3 mock_server/mock_server.py
+
+# Terminal 2: run test client (see test.py; uses InterfaceClient in mock mode)
+python3 test.py --checkpoint /path/to/your/checkpoint
 ```
 
-### 3. Test
+Use this to debug observation decoding and action posting without an Arena run.
+
+### 5. Submit
+
+- Log in to RoboChallenge Web and submit an evaluation request.
+- On **My Submissions**, open **Detail** for your run and copy the **Run ID** (used as `job_collection_id` below).
+
+### 6. Execute (official `demo.py`)
+
+When your run is scheduled, start the client **from the repo root** and keep it online for the session:
 
 ```bash
-# Open the mock_settings.py file and set the ROBOT_TAG and RECORD_DATA_DIR variables according to your robot and data directory requirements.
-# Notes:
-#   Only one pair of ROBOT_TAG and RECORD_DATA_DIR should be active at a time.
-#   Ensure that the RECORD_DATA_DIR path matches the structure of your data folder.
-#   You can find the appropriate ROBOT_TAG in your training data or on our website.
-# Start the test service
-python3 mock_robot_server.py
-# Use test.py for testing; it will automatically invoke the mock interface to help you debug your model
-# Replace {your_args} with the actual parameters you want to test, for example: --checkpoint xxx.
-python3 test.py {your_args}
+python3 demo.py \
+  --user_id <your_robochallenge_user_id> \
+  --job_collection_id <Run_ID_from_My_Submissions> \
+  --checkpoint /path/to/your/checkpoint
 ```
 
-### 4. Submit
+- Logs are written to `mylogfile.log` (see `demo.py` logging config).
+- The process polls the job collection, connects to the assigned robot, and exits after jobs finish (see `job_loop` in `robot/job_worker.py`).
 
-- Log in to RoboChallenge Web
-- Submit an evaluation request
-- On the "My Submission" page, you can view your submissions. Click "Detail" to see more information about a submission.
-- The Run ID displayed on the details page will be required for the evaluation process.
+If anything fails, check logs and that `robot/config.yaml` contains entries for the job’s `task_id` and index.
 
-### 5. Execute
+### 7. Result
 
-- Wait for a notification (on the website or via email) indicating that your task has been assigned.
-- Ensure the modified code from the previous steps is actively running during the assigned period.
-- After the task is completed, the program will exit normally. If you encounter any issues or exceptions, please feel
-  free to contact us.
-
-### 6. Result
-
-Once your task has been executed, you can view the results by visiting the "My Submissions" page on the website.
+When execution finishes, open **My Submissions** on the website to view scores and details.
 
 ## Key API Parameter Descriptions
 
-This is the direct interface for the robot.
-The base URL is `/api/robot/<id>/direct`. For example, if the robot ID is `1`, the full URL to get the state is
-`/api/robot/1/direct/state.pkl`.
+The **production** base host is `http://api.robochallenge.cn`. After `update_job_info(job_id, robot_id)` is called, the robot’s direct control base path is:
+
+`http://api.robochallenge.cn/robots/<robot_id>/direct`
+
+For example, state is `.../direct/state?client_id=<job_id>`. With `InterfaceClient(..., mock=True)`, requests go to `http://127.0.0.1:9098` (same path shape), e.g. after starting `mock_server/mock_server.py` on the default port.
+
+All robot interactions go through `InterfaceClient` (`robot/interface_client.py`). `job_loop` sets `update_job_info` from the job list — the **`robot_id` comes from the platform** (`job["device"]["robot_id"]`); you do not hard-code it in `demo.py`.
+
+```python
+from robot.interface_client import InterfaceClient
+from robot.job_worker import job_loop
+
+client = InterfaceClient(user_id="your_user_id")
+
+# job_loop automatically polls the Arena platform for assigned jobs,
+# extracts robot_id from the job info, and calls client.update_job_info() internally.
+job_loop(client, gpu_client, job_collection_id,
+         cameras=["kHeadColor", "kHandLeftColor", "kHandRightColor"],
+         image_width=224, image_height=224,
+         action_type="joint", action_freq=30.0)
+```
+
+---
 
 ### Sync Clock
 
-**Endpoint:** `/clock-sync`  
+**Endpoint:** `/clock_sync`
 **Method:** `GET`
 
 #### Request Parameters
@@ -102,7 +132,7 @@ None
 
 ```json
 {
-  "timestamp": 0.0
+  "timestamp": 1743400054.123
 }
 ```
 
@@ -110,34 +140,35 @@ None
 
 | Field     | Type  | Description                 |
 |-----------|-------|-----------------------------|
-| timestamp | float | unix timestamp on the robot |
+| timestamp | float | Unix timestamp on the robot |
 
 ---
 
 ### Get State
 
-**Endpoint:** `/state.pkl`  
+**Endpoint:** `/state`
 **Method:** `GET`
 
 #### Request Parameters
 
-| Parameter   | Type        | Required | Default | Description                                                                                                                                                                                                                                                                                                                                                                                          |
-|-------------|-------------|----------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| width       | integer     | No       | 224     | Width of the image                                                                                                                                                                                                                                                                                                                                                                                   |
-| height      | integer     | No       | 224     | Height of the image                                                                                                                                                                                                                                                                                                                                                                                  |
-| image_type  | list of str | Yes      | None    | Camera positions; can be one or more of `left_hand`, `right_hand`, `high`                                                                                                                                                                                                                                                                                                                            |
-| action_type | str         | Yes      | None    | Control mode; must be `joint` or `pos`, and can optionally be concatenated with `left` or `right`. All possible options are `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos`. The value should remain consistent during a job. Usually this is consistent with the parameter in Post Action. See the [Robot specific Notes](#robot-specific-notes) section for detailed information. |
+| Parameter    | Type        | Required | Default             | Description                                                                                                          |
+|--------------|-------------|----------|---------------------|----------------------------------------------------------------------------------------------------------------------|
+| cameras      | list of str | No       | all regular cameras | Camera names to include. Allowed: `kHeadStereoLeft`, `kHeadStereoRight`, `kHandLeftColor`, `kHandRightColor`, `kHeadColor`, `kHeadDepth` |
+| image_width  | int         | No*      | native resolution   | Width of the returned color images (1–8192). Must be set together with `image_height`                                |
+| image_height | int         | No*      | native resolution   | Height of the returned color images (1–8192). Must be set together with `image_width`                                |
+
+> \* `image_width` and `image_height` must both be set or both omitted.
+>
+> If the requested size exceeds the camera's native resolution, the original image is returned without upscaling.
+> Depth cameras (`kHeadDepth`) are never resized regardless of `image_width`/`image_height`.
 
 Additional notes on camera positions:
 
-For a dual-arm robot, `left_hand` and `right_hand` refer to the cameras mounted on the left and right arms,
-respectively. The `high` camera is positioned above the robot, providing a top-down view of the workspace.
-
-For a single-arm robot, `left_hand` always refers to the camera mounted on the arms. `right_hand` is on the opposite
-side of the robot, and `high` is on the right side of the robot.
-
-Some single-arm robots may lack cameras on the arm or right side. `left_hand` or `right_hand` are not available for
-those robots. See the [Robot specific Notes](#robot-specific-notes) section for detailed information.
+- `kHeadColor` — RGB camera on the robot head (640 × 400)
+- `kHeadDepth` — Depth camera on the robot head (640 × 400, raw Z16)
+- `kHandLeftColor` — RGB camera on the left arm (1280 × 1056)
+- `kHandRightColor` — RGB camera on the right arm (1280 × 1056)
+- `kHeadStereoLeft` / `kHeadStereoRight` — Stereo cameras on the head
 
 #### Response Example
 
@@ -145,128 +176,337 @@ The response is a pickle file containing a dictionary with the following structu
 
 ```python
 {
-    "state": 'normal',
-    "timestamp": 0.0,
-    "pending_actions": 10,
-    "action": [0.0, 0.0, ..., 0.0],
-    "images": {
-        "high": b'PNG',
-        "left_hand": b'PNG',
-        "right_hand": b'PNG'
+    "timestamp": 1743400054123456789,               # int, state capture time (nanoseconds)
+    "robot_position": {
+        "arm_joint_position": [0.0, ...],           # list[float] (14,) arm motor positions (rad)
+        "head_joint_position": [0.0, ...],          # list[float] (3,)  head motor positions (rad)
+        "waist_joint_position": [0.0, ...],         # list[float] (5,)  waist motor positions (rad)
+        "left_end_position": [x, y, z],             # list[float] (3,) metres, base_link frame
+        "left_end_orientation": [qx, qy, qz, qw],  # list[float] (4,) quaternion
+        "right_end_position": [x, y, z],
+        "right_end_orientation": [qx, qy, qz, qw],
+    },
+    "camera": {
+        "kHeadColor": {                             # color camera
+            "width": 640,
+            "height": 400,
+            "timestamp_ns": 1743400054123456789,
+            "data": b'\xff\xd8...',                 # JPEG bytes
+            "encoding": "JPEG",
+            "color_format": "RGB",
+        },
+        "kHeadDepth": {                             # depth camera
+            "width": 640,
+            "height": 400,
+            "timestamp_ns": 1743400054123456789,
+            "data": b'\x00\x00...',                 # raw Z16 bytes (uint16 LE, millimetres)
+            "encoding": "UNCOMPRESSED",
+            "color_format": "RS2_FORMAT_Z16",
+        },
+        # ... other requested cameras ...
+    },
+    "gripper_position": [0.0, 0.0],                 # list[float] (2,) [left, right]
+    "slam_pose": {                                   # None if SLAM unavailable
+        "position": [x, y, z],
+        "orientation": [qx, qy, qz, qw],
     }
 }
 ```
 
 #### Response Fields
 
-| Field             | Type          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-|-------------------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| state             | string        | Robot state. Should be `normal` if the robot is operational. If the value is `fault` or `abnormal`, there is an issue with the robot. If the value is `size_none`, the request parameter `image_type` or `action_type` is missing.                                                                                                                                                                                                                                                                                                                                                                                |
-| timestamp         | float         | Unix timestamp on the robot                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| pending_actions   | integer       | Number of pending actions in the queue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| action            | list of float | Current robot joint or position values. If `action_type` in the request contains `joint`, the joint values will be returned. If it contains `pos`, the tool end positions will be returned. If it contains `left` or `right`, only the values for the left or right arm will be returned. If neither is specified, values for both arms will be returned. For example, if the robot is Aloha with two arm, the list consists with `[joints of left arm, gripper of left arm, joints of right arm, gripper of right arm]`. See the [Robot specific Notes](#robot-specific-notes) section for detailed information. |
-| images            | dict          | Dictionary of images. Only includes camera positions specified in the `image_type` request parameter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| images.high       | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.left_hand  | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| images.right_hand | bytes         | PNG image bytes, if present                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Field                                    | Type         | Description                                                    |
+|------------------------------------------|--------------|----------------------------------------------------------------|
+| timestamp                                | int          | State capture timestamp in nanoseconds                         |
+| robot_position.arm_joint_position        | list[float]  | (14,) arm motor positions in radians                           |
+| robot_position.head_joint_position       | list[float]  | (3,) head motor positions in radians                           |
+| robot_position.waist_joint_position      | list[float]  | (5,) waist motor positions in radians                          |
+| robot_position.left_end_position         | list[float]  | (3,) left end-effector [x, y, z] in metres (base_link frame)  |
+| robot_position.left_end_orientation      | list[float]  | (4,) left end-effector quaternion [x, y, z, w]                 |
+| robot_position.right_end_position        | list[float]  | (3,) right end-effector [x, y, z] in metres (base_link frame) |
+| robot_position.right_end_orientation     | list[float]  | (4,) right end-effector quaternion [x, y, z, w]                |
+| camera.\<name\>.width                   | int          | Image width in pixels                                          |
+| camera.\<name\>.height                  | int          | Image height in pixels                                         |
+| camera.\<name\>.timestamp_ns            | int          | Per-camera capture timestamp in nanoseconds                    |
+| camera.\<name\>.data                    | bytes        | Image data (JPEG for color, raw Z16 for depth)                 |
+| camera.\<name\>.encoding                | str          | `"JPEG"` for color, `"UNCOMPRESSED"` for depth                 |
+| camera.\<name\>.color_format            | str          | `"RGB"` for color, `"RS2_FORMAT_Z16"` for depth                |
+| gripper_position                         | list[float]  | (2,) [left, right] gripper positions                           |
+| slam_pose                               | dict or None | SLAM pose; None if unavailable                                 |
 
 ---
 
 ### Post Action
 
-**Endpoint:** `/action`  
+**Endpoint:** `/actions`
 **Method:** `POST`
+
+Send a batch of target actions to the robot. The server automatically resamples the trajectory from `action_freq` to the execution rate (100 Hz for joint mode, 50 Hz for pose mode).
+
+Each action is a **dict** containing `robot_position` (required), and optionally `gripper_position` and `chassis_velocity`.
 
 #### Request Parameters
 
-| Parameter   | Type | Required | Default | Description                                                                                                                                                                                                                                       |
-|-------------|------|----------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| action_type | str  | Yes      | None    | Control mode. All possible options are `joint`, `pos`, `leftjoint`, `leftpos`, `rightjoint`, `rightpos`. The value should remain consistent during a job. See the [Robot specific Notes](#robot-specific-notes) section for detailed information. |
+| Parameter   | Type       | Required | Default  | Description                                                                      |
+|-------------|------------|----------|----------|----------------------------------------------------------------------------------|
+| actions     | list[dict] | Yes      | —        | List of action dicts (see format below). Each dict is one frame of the trajectory |
+| action_type | str        | No       | "joint"  | Control mode: `"joint"` or `"pose"`                                              |
+| action_freq | float      | No       | 30.0     | Source trajectory sampling rate in Hz (0 < freq ≤ 500)                           |
 
 The HTTP body should be a JSON object with the following structure:
+
+**Joint mode example:**
 
 ```json
 {
   "actions": [
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ]
+    {
+      "robot_position": {
+        "arm_joint_position": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "head_joint_position": [0.0, 0.0, 0.0],
+        "waist_joint_position": [0.0, 0.0, 0.0, 0.0, 0.0]
+      },
+      "gripper_position": [0.0, 0.0],
+      "chassis_velocity": [0.0, 0.0, 0.0]
+    }
   ],
-  "duration": 0.0
+  "action_type": "joint",
+  "action_freq": 30.0
 }
 ```
 
-| Field    | Type          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-|----------|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| actions  | 2D float list | Target joint or position values. If `action_type` in the request contains `joint`, the target values control the robot joints. If it contains `pos`, the tool end positions will be controlled. If it contains `left` or `right`, only the left or right arm will be controlled. If neither is specified, both arms will be controlled. The shape of the array is (number of actions, target values per action). For example, if you are using ALOHA and `action_type` is `joint`, then the shape of the actions array should be (N, 14): 6 joints and 1 gripper per arm, N is the number of steps your model infers. See the [Robot specific Notes](#robot-specific-notes) section for detailed information.  |
-| duration | float         | Duration (second) per action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+**Pose mode example:**
+
+```json
+{
+  "actions": [
+    {
+      "robot_position": {
+        "left_end_position": [0.3, 0.2, 0.5],
+        "left_end_orientation": [0.0, 0.0, 0.0, 1.0],
+        "right_end_position": [0.3, -0.2, 0.5],
+        "right_end_orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "gripper_position": [0.0, 0.0]
+    }
+  ],
+  "action_type": "pose",
+  "action_freq": 30.0
+}
+```
+
+#### Action dict fields
+
+| Field                                    | Type         | Required | Description                                          |
+|------------------------------------------|--------------|----------|------------------------------------------------------|
+| robot_position                           | dict         | Yes      | Joint or pose targets (see below)                    |
+| robot_position.arm_joint_position        | list[float]  | joint    | (14,) arm motor positions in radians                 |
+| robot_position.head_joint_position       | list[float]  | joint    | (3,) head motor positions in radians                 |
+| robot_position.waist_joint_position      | list[float]  | joint    | (5,) waist motor positions in radians                |
+| robot_position.left_end_position         | list[float]  | pose     | (3,) [x, y, z] in metres                            |
+| robot_position.left_end_orientation      | list[float]  | pose     | (4,) [qx, qy, qz, qw] quaternion                   |
+| robot_position.right_end_position        | list[float]  | pose     | (3,) [x, y, z] in metres                            |
+| robot_position.right_end_orientation     | list[float]  | pose     | (4,) [qx, qy, qz, qw] quaternion                   |
+| gripper_position                         | list[float]  | No       | (2,) [left, right] gripper positions                 |
+| chassis_velocity                         | list[float]  | No       | (3,) [vx, vy, wz] chassis velocity                  |
 
 #### Response Example
 
 ```json
 {
-  "result": "success",
-  "message": ""
+  "status": "accepted"
 }
-
 ```
 
 #### Response Fields
 
-| Field   | Type   | Description                                                                                                                                                        |
-|---------|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| result  | string | Result of the request. Only `success` or `error` will be returned.                                                                                                 |
-| message | string | Reason for `error` result, if any. possible message: the robot is not running (fault or logging), the action shape is wrong, action queue is full, other exception |
+| Field  | Type   | Description                                 |
+|--------|--------|---------------------------------------------|
+| status | string | `"accepted"` — actions queued for execution |
 
-## Robot specific Notes
+---
 
-Different robots have different action shapes and camera placement.
+### Stop Motion
 
-- Aloha
-    - Dual-arm robot
-    - 7 DOF per arm (6 joints + 1 gripper)
-    - Joint control:
-        - one arm(left or right): 7 numbers total: `[6 joints, 1 gripper]`
-        - two arms: 14 numbers total: `[left 6 joints, left 1 gripper, right 6 joints, right 1 gripper]`
-    - Pose control
-        - one arm(left or right): 8 numbers total: `[x, y, z, quaternion(xyzw), gripper]`
-        - two arms: 16 numbers
-          total: `[left x, left y, left z, left quaternion(xyzw), left gripper, right x, right y, right z, right quaternion(xyzw), right gripper]`
-    - 3 cameras: mounted on left/right arm, and on the top of the robot
+**Endpoint:** `/stop_motion`
+**Method:** `POST`
 
-- Arx5
-    - Single-arm robot
-    - 7 DOF (6 joints + 1 gripper)
-    - Joint control: 7 numbers total: `[6 joints, 1 gripper]`
-    - Pose control: 7 numbers total: `[x, y, z, roll, pinch, yaw, gripper]`
-    - You must always use `left` in the `action_type` parameter, e.g., `leftjoint` or `leftpos`.
-    - 3 cameras: mounted on the arm, opposite to the arm, and on the right side of the arm
+Cancel all pending actions on the robot.
 
-- Ur5
-    - Single-arm robot
-    - 7 DOF (6 joints + 1 gripper)
-    - Joint control: 7 numbers total: `[6 joints, 1 gripper]`
-    - Pose control: 8 numbers total: `[x, y, z, quaternion(xyzw), gripper]`
-    - You must always use `left` in the `action_type` parameter, e.g., `leftjoint` or `leftpos`.
-    - 2 cameras: mounted on the arm, and opposite to the arm
+#### Request Parameters
 
-- Franka
-    - Single-arm robot
-    - 8 DOF (7 joints + 1 gripper)
-    - Joint control: 8 numbers total: `[7 joints, 1 gripper]`
-    - Pose control: 8 numbers total: `[x, y, z, quaterion(xyzw), gripper]`
-    - You must always use `left` in the `action_type` parameter, e.g., `leftjoint` or `leftpos`.
-    - 3 cameras: mounted on the arm, opposite to the arm, and on the right side of the arm
+None (session is identified automatically).
 
+#### Response Example
+
+```json
+{
+  "status": "success"
+}
+```
+
+#### Response Fields
+
+| Field  | Type   | Description                                                  |
+|--------|--------|--------------------------------------------------------------|
+| status | string | `"success"` — all pending actions cancelled                  |
+
+---
+
+### Get Status
+
+**Endpoint:** `/status`
+**Method:** `GET`
+
+Query the current motion playback status.
+
+#### Request Parameters
+
+None (session is identified automatically).
+
+#### Response Example
+
+```json
+{
+  "action_queue": 120,
+  "navigation_queue": 0,
+  "resetting": false,
+  "status": "pending actions"
+}
+```
+
+#### Response Fields
+
+| Field            | Type   | Description                                                                  |
+|------------------|--------|------------------------------------------------------------------------------|
+| action_queue     | int    | Remaining action frames yet to be sent to the robot                          |
+| navigation_queue | int    | Navigation targets in flight or queued                                       |
+| resetting        | bool   | Whether a reset operation is in progress                                     |
+| status           | string | `"free"`, `"resetting"`, `"navigating"`, `"pending actions"`, or `"pending"` |
+
+Status priority: `resetting` > actively `navigating` > actively `pending actions` > `pending` (queued, waiting for lock) > `free`.
+
+---
+
+### Navigate to Position
+
+**Endpoint:** `/goto_navi_position`
+**Method:** `POST`
+
+Navigate the robot chassis to a map-frame goal. The server runs the navigation in the background; the response returns immediately.
+
+#### Request Parameters
+
+| Parameter  | Type | Required | Default | Description                                                                |
+|------------|------|----------|---------|----------------------------------------------------------------------------|
+| position   | dict | Yes      | —       | Goal with keys `position` [x, y, z] m and `orientation` [qx, qy, qz, qw] |
+| max_refine | int  | No       | 5       | Max chassis refinement iterations (1–100)                                  |
+
+The HTTP body should be a JSON object:
+
+```json
+{
+  "position": {
+    "position": [1.0, 2.0, 0.0],
+    "orientation": [0.0, 0.0, 0.0, 1.0]
+  },
+  "max_refine": 5
+}
+```
+
+#### Response Example
+
+```json
+{
+  "status": "accepted"
+}
+```
+
+#### Response Fields
+
+| Field  | Type   | Description                                                 |
+|--------|--------|-------------------------------------------------------------|
+| status | string | `"accepted"` — navigation goal queued for background execution |
+
+---
+
+## Robot Specific Notes
+
+### G2 (Dual-Arm Humanoid)
+
+- Dual-arm humanoid robot with mobile chassis
+- 14 DOF arms (7 joints × 2 arms)
+- 3 DOF head, 5 DOF waist
+- 2 grippers (left, right), range **[-0.91, 0.0]** (0.0 = fully open, -0.91 = fully closed)
+
+**Joint control:**
+- `arm_joint_position`: 14 floats — `[left 7 joints, right 7 joints]` in radians
+- `head_joint_position`: 3 floats in radians
+- `waist_joint_position`: 5 floats in radians
+- `gripper_position`: 2 floats — `[left, right]`, range [-0.91, 0.0]
+
+**Pose control:**
+- `left_end_position`: `[x, y, z]` in metres (base_link frame)
+- `left_end_orientation`: `[qx, qy, qz, qw]` quaternion
+- `right_end_position`: `[x, y, z]` in metres (base_link frame)
+- `right_end_orientation`: `[qx, qy, qz, qw]` quaternion
+
+**Chassis control (optional in actions):**
+- `chassis_velocity`: `[vx, vy, wz]` — linear x, linear y, angular z
+
+**Joint limits (radians):**
+
+`waist_joint_position` (5 joints):
+
+| Index | Joint Name    | Min (rad) | Max (rad) |
+|-------|---------------|-----------|-----------|
+| 0     | body_joint1   | -1.0821   | 0.0002    |
+| 1     | body_joint2   | -0.0002   | 2.6529    |
+| 2     | body_joint3   | -1.9199   | 1.0390    |
+| 3     | body_joint4   | -0.4363   | 0.4363    |
+| 4     | body_joint5   | -3.0456   | 3.0456    |
+
+`head_joint_position` (3 joints):
+
+| Index | Joint Name    | Min (rad) | Max (rad) |
+|-------|---------------|-----------|-----------|
+| 0     | head_joint1   | -0.7810   | 0.7810    |
+| 1     | head_joint2   | -0.1510   | 0.1510    |
+| 2     | head_joint3   | -0.0180   | 0.5230    |
+
+`arm_joint_position` (14 joints = left 7 + right 7, left and right share the same limits):
+
+| Index (L/R) | Joint Name  | Min (rad) | Max (rad) |
+|-------------|-------------|-----------|-----------|
+| 0 / 7       | arm_joint1  | -3.0718   | 3.0718    |
+| 1 / 8       | arm_joint2  | -2.0595   | 2.0595    |
+| 2 / 9       | arm_joint3  | -3.0718   | 3.0718    |
+| 3 / 10      | arm_joint4  | -2.4958   | 1.0123    |
+| 4 / 11      | arm_joint5  | -3.0718   | 3.0718    |
+| 5 / 12      | arm_joint6  | -1.0123   | 1.0123    |
+| 6 / 13      | arm_joint7  | -1.5359   | 1.5359    |
+
+`gripper_position` (2 values):
+
+| Index | Side  | Min   | Max |
+|-------|-------|-------|-----|
+| 0     | Left  | -0.91 | 0.0 |
+| 1     | Right | -0.91 | 0.0 |
+
+> Values outside these limits are automatically clamped by the server before execution.
+
+**Cameras:**
+
+| Name              | Type  | Resolution  | Description          |
+|-------------------|-------|-------------|----------------------|
+| kHeadColor        | RGB   | 640 × 400   | Head-mounted color   |
+| kHeadDepth        | Z16   | 640 × 400   | Head-mounted depth   |
+| kHandLeftColor    | RGB   | 1280 × 1056 | Left arm-mounted     |
+| kHandRightColor   | RGB   | 1280 × 1056 | Right arm-mounted    |
+| kHeadStereoLeft   | RGB   | —           | Head stereo (left)   |
+| kHeadStereoRight  | RGB   | —           | Head stereo (right)  |
+
+---
 
 ## Contact
 

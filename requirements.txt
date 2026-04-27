@@ -6,3 +6,4 @@ opencv-python
 fastapi
 pillow
 uvicorn
+pyyaml
