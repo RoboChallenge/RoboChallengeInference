@@ -1,520 +1,348 @@
-# RoboChallengeInference — G2
+# pi0.5 baseline for RoboChallenge / ICRA
 
-Offline inference code for the **G2** dual-arm humanoid: poll Arena jobs, read robot state, run your policy, and stream actions back to the real robot (or a local mock).
+This repository is a self‑contained baseline for the **G2 dual‑arm humanoid**
+track of [RoboChallenge](https://api.robochallenge.cn/). It packages everything
+needed to fine‑tune a [pi0.5](https://www.physicalintelligence.company/blog/pi05)
+VLA model on G2 data and to run that model live against the Arena evaluation
+platform.
 
-## Project Structure
+It is a heavily trimmed fork of
+[Physical‑Intelligence/openpi](https://github.com/Physical-Intelligence/openpi):
+all non‑G2 robots, the FAST autoregressive head, RLDS / DROID data loading,
+WebSocket policy serving, and Docker assets have been removed so the codebase
+focuses on a single end‑to‑end flow:
 
 ```
-RoboChallengeInference-G2/
-├── README.md
-├── requirements.txt
-├── demo.py                 # Official evaluation: Arena job_loop + your policy
-├── test.py                 # Local loop against mock (no job collection)
-├── robot/
-│   ├── config.yaml         # task_id → slot index → target object name(s)
-│   ├── __init__.py
-│   ├── interface_client.py # HTTP client to Arena + robot
-│   └── job_worker.py       # job_loop, process_job
-├── mock_server/
-│   ├── mock_server.py      # FastAPI mock of robot direct API
-│   └── utils.py
-└── utils/
-    ├── __init__.py
-    ├── enums.py
-    ├── log.py
-    └── util.py
+raw G2 episodes → LeRobot dataset → norm stats → pi0.5 fine‑tune → live G2 inference
 ```
 
-## User Guide
+---
 
-### 1. Installation
+## 1. Repository layout
+
+```
+.
+├── examples/g2/convert_g2_data_to_lerobot.py   # raw G2 → LeRobot
+├── scripts/
+│   ├── compute_norm_stats.py                   # reference impl
+│   ├── compute_norm_stats_fast.py              # fast parquet impl
+│   ├── train.py                                # JAX training entry
+│   └── train_pytorch.py                        # PyTorch training entry
+├── src/openpi/                                 # trimmed openpi (G2 only)
+│   ├── models/, models_pytorch/                # pi0 / pi0.5 implementations
+│   ├── policies/g2_policy.py                   # G2 input/output transforms
+│   └── training/config.py                      # only G2 + debug configs
+├── packages/openpi-client/                     # base policy + image utils
+├── robochallenge_inference/                    # Arena client + Pi0.5 wrapper
+│   ├── policy.py                               # Pi05Policy bridge
+│   ├── demo.py                                 # official Arena entry point
+│   ├── test.py                                 # mock‑server smoke test
+│   ├── robot/                                  # InterfaceClient + job_loop
+│   └── mock_server/                            # local FastAPI mock
+├── train.sh                                    # one‑shot train pipeline
+└── pyproject.toml
+```
+
+Available training configs in `src/openpi/training/config.py`:
+| Name | Action horizon | Notes |
+|------|----------------|-------|
+| `pi05_g2_finetune`     | 50  | recommended default |
+| `debug` / `debug_pi05` | —   | tiny configs against `FakeDataConfig` |
+
+---
+
+## 2. Requirements
+
+| Stage             | GPU memory | Tested GPU         |
+|-------------------|------------|--------------------|
+| Inference         | ≥ 8 GB     | RTX 4090           |
+| Fine‑tune (LoRA)  | ≥ 22.5 GB  | RTX 4090           |
+| Fine‑tune (full)  | ≥ 70 GB    | A100 80GB / H100   |
+
+* Linux (tested on Ubuntu 22.04), CUDA 12, Python 3.11.
+* Dependencies are pinned via `uv`; install it first:
+  <https://docs.astral.sh/uv/getting-started/installation/>.
+
+---
+
+## 3. Installation
 
 ```bash
-git clone <this-repository-url>
-cd RoboChallengeInference-G2
+git clone <this-repo-url> pi05_g2_baseline
+cd pi05_g2_baseline
 
-# (Recommended) Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# Install python deps (jax + cuda12, torch, lerobot, openpi-client, ...)
+GIT_LFS_SKIP_SMUDGE=1 uv sync
+GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 
-pip install -r requirements.txt
+# Optional: extras needed by `robochallenge_inference/mock_server/mock_server.py`.
+GIT_LFS_SKIP_SMUDGE=1 uv sync --group mock
 ```
 
-### 2. Implement your policy
+`uv sync` creates `.venv/` automatically. **Use the same env for training,
+`scripts/train.py`, `scripts/compute_norm_stats[_fast].py`, and the
+`robochallenge_inference/` entry points** — `Pi05Policy` imports `openpi.*`
+directly and needs the full ML stack (jax / flax / torch / transformers /
+lerobot / safetensors / orbax) provided by this `pyproject.toml`.
 
-- Edit `demo.py`: replace `DummyPolicy` with your model (load weights in `__init__`, run inference in `run_policy(state, prompt)`).
-- `GPUClient` builds a language prompt from `target_objects` (see `robot/config.yaml` and `_process_prompt`).
-- Default cameras are `G2_CAMERAS` in `demo.py` (`kHeadColor`, `kHandLeftColor`, `kHandRightColor`); you can change resolution via `job_loop` arguments.
+Prefix any subsequent command with `uv run`, or activate once with
+`source .venv/bin/activate`.
 
-### 3. Target mapping (`robot/config.yaml`)
+---
 
-`job_loop` loads `robot/config.yaml` at startup. The Arena job API returns a **`task_id`** and a per-task **`index`**. The YAML file maps them to the **list of product names** passed to `GPUClient.infer()`.
+## 4. End‑to‑end pipeline
 
-- Top-level keys = `task_id` values returned by the platform (e.g. `22er`, `22et`).
-- Second-level keys = **string** indices `"0"` … `"9"` (JSON may send integers; the code uses `str(index)` when looking up).
-- Values = a list of one or two product name strings, matching the task type (single or dual object).
-
-**Run processes from the repository root** so the path `robot/config.yaml` resolves. Keep task keys in sync with the tasks you register on the platform.
-
-### 4. Local test (mock)
+The full pipeline is in `train.sh`. Each step is reproduced below with more
+context. `G2_LEROBOT_REPO_ID` is the LeRobot dataset id used by the converter,
+the norm‑stats script, and the training config — keep it consistent across all
+three steps.
 
 ```bash
-# Terminal 1: mock robot API (default: http://127.0.0.1:9098 when using mock in InterfaceClient)
-python3 mock_server/mock_server.py
-
-# Terminal 2: run test client (see test.py; uses InterfaceClient in mock mode)
-python3 test.py --checkpoint /path/to/your/checkpoint
+export G2_LEROBOT_REPO_ID="local/icra_g2_dataset"
 ```
 
-Use this to debug observation decoding and action posting without an Arena run.
+### 4.1 Convert raw G2 data → LeRobot
 
-### 5. Submit
+`examples/g2/convert_g2_data_to_lerobot.py` reads the official G2 dump
+(image folders + per‑episode HDF5 + `lang.json`) and writes a LeRobot dataset
+at `~/.cache/huggingface/lerobot/$G2_LEROBOT_REPO_ID`.
 
-- Log in to RoboChallenge Web and submit an evaluation request.
-- On **My Submissions**, open **Detail** for your run and copy the **Run ID** (used as `run_id` below).
+It produces:
 
-### 6. Execute (official `demo.py`)
-
-When your run is scheduled, start the client **from the repo root** and keep it online for the session:
+* `actions` — **24‑D absolute** vector
+  `[left_arm_7, left_grip, right_arm_7, right_grip, waist_5, base_vxvyvw_3]`
+* `observation.state` — **26‑D** vector
+  `[left_arm_7, left_grip, right_arm_7, right_grip, waist_5, slam_xyz_3, slam_zw_2]`
+* three 224×224 RGB streams: `head_color`, `hand_left_color`, `hand_right_color`
+* a target‑centric prompt:
+  `"Target: <a>. Pick the <a> from the shelf and place it into the cart."`
 
 ```bash
-python3 demo.py \
-  --user_token <your_robochallenge_user_id> \
-  --run_id <Run_ID_from_My_Submissions> \
-  --checkpoint /path/to/your/checkpoint
+uv run examples/g2/convert_g2_data_to_lerobot.py \
+    --data-dir <your_g2_icra_data_dir> \
+    --num-workers 32 \
+    --queue-size 32
 ```
 
-- Logs are written to `mylogfile.log` (see `demo.py` logging config).
-- The process polls the job collection, connects to the assigned robot, and exits after jobs finish (see `job_loop` in `robot/job_worker.py`).
+### 4.2 Compute normalization statistics
 
-If anything fails, check logs and that `robot/config.yaml` contains entries for the job’s `task_id` and index.
+The training pipeline normalizes `state` / `actions` with quantile stats stored
+under `assets/<config_name>/<repo_id>/norm_stats.json`.
 
-### 7. Result
+Two equivalent implementations are provided:
 
-When execution finishes, open **My Submissions** on the website to view scores and details.
+```bash
+# Fast: read state/actions directly from LeRobot parquet files (recommended).
+uv run scripts/compute_norm_stats_fast.py --config-name pi05_g2_finetune
 
-## Key API Parameter Descriptions
-
-The **production** base host is `http://api.robochallenge.cn`. After `update_job_info(job_id, robot_id)` is called, the robot’s direct control base path is:
-
-`http://api.robochallenge.cn/robots/<robot_id>/direct`
-
-For example, state is `.../direct/state?client_id=<job_id>`. With `InterfaceClient(..., mock=True)`, requests go to `http://127.0.0.1:9098` (same path shape), e.g. after starting `mock_server/mock_server.py` on the default port.
-
-All robot interactions go through `InterfaceClient` (`robot/interface_client.py`). `job_loop` sets `update_job_info` from the job list — the **`robot_id` comes from the platform** (`job["device"]["robot_id"]`); you do not hard-code it in `demo.py`.
-
-```python
-from robot.interface_client import InterfaceClient
-from robot.job_worker import job_loop
-
-client = InterfaceClient(user_token="your_user_token")
-
-# job_loop automatically polls the Arena platform for assigned jobs,
-# extracts robot_id from the job info, and calls client.update_job_info() internally.
-job_loop(client, gpu_client, run_id,
-         cameras=["kHeadColor", "kHandLeftColor", "kHandRightColor"],
-         image_width=224, image_height=224,
-         action_type="joint", action_freq=30.0)
+# Reference: full HuggingFace pipeline with image decoding (slower).
+uv run scripts/compute_norm_stats.py --config-name pi05_g2_finetune
 ```
+
+Both write the same `norm_stats.json` and a sanity report; you can verify
+equivalence with `scripts/check_norm_stats_fast.py`.
+
+### 4.3 Fine‑tune pi0.5 on G2 data
+
+```bash
+# JAX (default).
+uv run scripts/train.py pi05_g2_finetune --exp-name g2_finetune_run_1
+
+# PyTorch (alternative).
+uv run scripts/train_pytorch.py pi05_g2_finetune --exp-name g2_finetune_torch
+```
+
+The first run downloads the pi0.5 base checkpoint from
+`gs://openpi-assets/checkpoints/pi05_base/params` (configured in
+`weight_loaders.CheckpointWeightLoader`). Checkpoints land under
+`checkpoints/<config_name>/<exp_name>/<step>/`.
+
+To use Weights & Biases logging, set `WANDB_API_KEY`; otherwise edit the
+config to set `wandb_enabled=False` (the `debug` config already does this).
+
+For a multi‑GPU sharded run, set `fsdp_devices` in the training config or via
+the CLI (`scripts/train.py pi05_g2_finetune --fsdp-devices 4 ...`).
 
 ---
 
-### Sync Clock
+## 5. Inference on RoboChallenge G2
 
-**Endpoint:** `/clock_sync`
-**Method:** `GET`
+The `robochallenge_inference/` folder contains a turnkey Arena client. The
+heavy lifting is in `policy.py::Pi05Policy`, which:
 
-#### Request Parameters
+1. ensures `import openpi` works from a checkout (`--openpi-src`),
+2. loads either an Orbax (`params/`) or PyTorch (`model.safetensors`) checkpoint
+   produced by step 4.3,
+3. converts a single `InterfaceClient.get_state` payload (cameras + joints +
+   SLAM) into the 26‑D state and three 224×224 RGB streams,
+4. runs `policy_config.create_trained_policy(...).infer(...)` with the same
+   target‑centric prompt that was used during training,
+5. unpacks the `(T, 24)` absolute action chunk into the joint‑mode dicts that
+   `InterfaceClient.post_actions` expects.
 
-None
+`demo.py` is the official entry point used during evaluation; `test.py` is a
+local smoke test that drives the same code paths against a FastAPI mock.
 
-#### Response Example
+### 5.1 Official baseline checkpoint (Hugging Face)
 
-```json
-{
-  "timestamp": 1743400054.123
-}
+Organizers provide a **fine‑tuned G2 pi0.5 baseline** (JAX / Orbax only; there
+is **no** PyTorch `model.safetensors` in this release) here:
+
+**<https://huggingface.co/RoboChallenge/icra_wbc_baseline>**
+
+**Download** (from the repo root; requires `huggingface_hub`, already a
+dependency of this project):
+
+```bash
+uv run huggingface-cli download RoboChallenge/icra_wbc_baseline \
+    --repo-type model \
+    --local-dir ./checkpoints/icra_wbc_baseline
 ```
 
-#### Response Fields
+Use `huggingface-cli login` or set `HF_TOKEN` if access is restricted.
 
-| Field     | Type  | Description                 |
-|-----------|-------|-----------------------------|
-| timestamp | float | Unix timestamp on the robot |
+**`--checkpoint` —** path to the **innermost step directory** that matches a
+local training run (§4.3): for this Hub model it must directly contain the JAX
+**`params/`** tree (Orbax), and usually **`assets/`** with `norm_stats.json`.
+Open the `Files` tab on the Hub if the archive uses extra nesting; pick the
+folder at that leaf level. (PyTorch checkpoints use `model.safetensors`
+instead; this baseline does not ship that layout.)
+
+**`--train-config`** must be the **same OpenPI config name** the checkpoint
+was trained with. For weights produced with this repository’s default G2
+recipe, use `pi05_g2_finetune` (see `src/openpi/training/config.py`).
+
+Example after download (adjust `<path_to_step>`). For JAX checkpoints,
+`--device` is ignored; omit it or leave it as you prefer:
+
+```bash
+uv run python robochallenge_inference/test.py \
+    --checkpoint ./checkpoints/icra_wbc_baseline/<path_to_step> \
+    --train-config pi05_g2_finetune \
+    --openpi-src "$(pwd)/src" \
+    --targets Pepsi
+
+uv run python robochallenge_inference/demo.py \
+    --user_token <token> \
+    --run_id <Run_ID> \
+    --checkpoint ./checkpoints/icra_wbc_baseline/<path_to_step> \
+    --train-config pi05_g2_finetune \
+    --openpi-src "$(pwd)/src" \
+    --action-freq 30
+```
+
+### 5.2 Local smoke test (mock server)
+
+```bash
+# Make sure the mock-server extras are installed (one-time):
+GIT_LFS_SKIP_SMUDGE=1 uv sync --group mock
+
+# Terminal 1 — start the mock direct‑robot API on 127.0.0.1:9098.
+uv run python robochallenge_inference/mock_server/mock_server.py
+
+# Terminal 2 — run a single mock job through the policy.
+uv run python robochallenge_inference/test.py \
+    --checkpoint <your_model_checkpoint_path> \
+    --train-config pi05_g2_finetune \
+    --openpi-src "$(pwd)/src" \
+    --device cuda \
+    --targets Pepsi
+```
+
+The script exits cleanly after the mock finishes one job; logs go to stderr.
+
+### 5.3 Live Arena run
+
+After your evaluation request is accepted on the RoboChallenge web console,
+copy the **Run ID** from *My Submissions* and run from the repo root:
+
+```bash
+uv run python robochallenge_inference/demo.py \
+    --user_token <your_robochallenge_user_token> \
+    --run_id <Run_ID_from_My_Submissions> \
+    --checkpoint <your_model_checkpoint_path> \
+    --train-config pi05_g2_finetune \
+    --openpi-src "$(pwd)/src" \
+    --device cuda \
+    --action-freq 30
+```
+
+The process keeps polling Arena for assigned jobs, executes them sequentially,
+and exits when the collection is drained. Logs are written to `mylogfile.log`
+(see `demo.py` logging config).
+
+> **Prompt consistency.** `GPUClient._process_prompt` rebuilds the exact prompt
+> format used by `convert_g2_data_to_lerobot.py`
+> (`"Target: <a>[ and <b>]. Pick the <a> [and the <b>] from the shelf and place
+> [it|them] into the cart."`). If you change the converter, mirror the change
+> in `demo.py` to keep training and inference aligned.
+
+> **Targets.** `robot/job_worker.py::job_loop` resolves the per‑job
+> `target_objects` from `robochallenge_inference/robot/config.yaml`
+> (`task_id` → `index` → list of product names). Update that file before
+> registering a new task on the platform.
+
+The full Arena HTTP API (`/state`, `/actions`, `/status`, `/stop_motion`,
+`/goto_navi_position`, …) and the G2 joint limits are documented at
+<https://api.robochallenge.cn/> and inline in
+`robochallenge_inference/robot/interface_client.py`.
 
 ---
 
-### Get State
+## 6. Action / state contract (must stay aligned)
 
-**Endpoint:** `/state`
-**Method:** `GET`
+The same layout is enforced by the converter, the training transform
+(`src/openpi/policies/g2_policy.py`), and the inference wrapper. Changing it
+in one place silently breaks the others.
 
-#### Request Parameters
-
-| Parameter    | Type        | Required | Default             | Description                                                                                                          |
-|--------------|-------------|----------|---------------------|----------------------------------------------------------------------------------------------------------------------|
-| cameras      | list of str | No       | all regular cameras | Camera names to include. Allowed: `kHeadStereoLeft`, `kHeadStereoRight`, `kHandLeftColor`, `kHandRightColor`, `kHeadColor`, `kHeadDepth` |
-| image_width  | int         | No*      | native resolution   | Width of the returned color images (1–8192). Must be set together with `image_height`                                |
-| image_height | int         | No*      | native resolution   | Height of the returned color images (1–8192). Must be set together with `image_width`                                |
-
-> \* `image_width` and `image_height` must both be set or both omitted.
->
-> If the requested size exceeds the camera's native resolution, the original image is returned without upscaling.
-> Depth cameras (`kHeadDepth`) are never resized regardless of `image_width`/`image_height`.
-
-Additional notes on camera positions:
-
-- `kHeadColor` — RGB camera on the robot head (640 × 400)
-- `kHeadDepth` — Depth camera on the robot head (640 × 400, raw Z16)
-- `kHandLeftColor` — RGB camera on the left arm (1280 × 1056)
-- `kHandRightColor` — RGB camera on the right arm (1280 × 1056)
-- `kHeadStereoLeft` / `kHeadStereoRight` — Stereo cameras on the head
-
-#### Response Example
-
-The response is a pickle file containing a dictionary with the following structure:
-
-```python
-{
-    "timestamp": 1743400054123456789,               # int, state capture time (nanoseconds)
-    "robot_position": {
-        "arm_joint_position": [0.0, ...],           # list[float] (14,) arm motor positions (rad)
-        "head_joint_position": [0.0, ...],          # list[float] (3,)  head motor positions (rad)
-        "waist_joint_position": [0.0, ...],         # list[float] (5,)  waist motor positions (rad)
-        "left_end_position": [x, y, z],             # list[float] (3,) metres, base_link frame
-        "left_end_orientation": [qx, qy, qz, qw],  # list[float] (4,) quaternion
-        "right_end_position": [x, y, z],
-        "right_end_orientation": [qx, qy, qz, qw],
-    },
-    "camera": {
-        "kHeadColor": {                             # color camera
-            "width": 640,
-            "height": 400,
-            "timestamp_ns": 1743400054123456789,
-            "data": b'\xff\xd8...',                 # JPEG bytes
-            "encoding": "JPEG",
-            "color_format": "RGB",
-        },
-        "kHeadDepth": {                             # depth camera
-            "width": 640,
-            "height": 400,
-            "timestamp_ns": 1743400054123456789,
-            "data": b'\x00\x00...',                 # raw Z16 bytes (uint16 LE, millimetres)
-            "encoding": "UNCOMPRESSED",
-            "color_format": "RS2_FORMAT_Z16",
-        },
-        # ... other requested cameras ...
-    },
-    "gripper_position": [0.0, 0.0],                 # list[float] (2,) [left, right]
-    "slam_pose": {                                   # None if SLAM unavailable
-        "position": [x, y, z],
-        "orientation": [qx, qy, qz, qw],
-    }
-}
+**Action (24‑D, all absolute):**
+```
+0–6   left arm joints (rad)
+7     left gripper position ∈ [-0.91, 0]
+8–14  right arm joints (rad)
+15    right gripper position ∈ [-0.91, 0]
+16–20 waist joints (rad)
+21–23 chassis velocity (vx, vy, wz)
 ```
 
-#### Response Fields
+**State (26‑D):**
+```
+0–6   left arm joints
+7     left gripper
+8–14  right arm joints
+15    right gripper
+16–20 waist
+21–23 SLAM position (x, y, z)
+24–25 SLAM orientation (z, w)   # quaternion x/y are dropped
+```
 
-| Field                                    | Type         | Description                                                    |
-|------------------------------------------|--------------|----------------------------------------------------------------|
-| timestamp                                | int          | State capture timestamp in nanoseconds                         |
-| robot_position.arm_joint_position        | list[float]  | (14,) arm motor positions in radians                           |
-| robot_position.head_joint_position       | list[float]  | (3,) head motor positions in radians                           |
-| robot_position.waist_joint_position      | list[float]  | (5,) waist motor positions in radians                          |
-| robot_position.left_end_position         | list[float]  | (3,) left end-effector [x, y, z] in metres (base_link frame)  |
-| robot_position.left_end_orientation      | list[float]  | (4,) left end-effector quaternion [x, y, z, w]                 |
-| robot_position.right_end_position        | list[float]  | (3,) right end-effector [x, y, z] in metres (base_link frame) |
-| robot_position.right_end_orientation     | list[float]  | (4,) right end-effector quaternion [x, y, z, w]                |
-| camera.\<name\>.width                   | int          | Image width in pixels                                          |
-| camera.\<name\>.height                  | int          | Image height in pixels                                         |
-| camera.\<name\>.timestamp_ns            | int          | Per-camera capture timestamp in nanoseconds                    |
-| camera.\<name\>.data                    | bytes        | Image data (JPEG for color, raw Z16 for depth)                 |
-| camera.\<name\>.encoding                | str          | `"JPEG"` for color, `"UNCOMPRESSED"` for depth                 |
-| camera.\<name\>.color_format            | str          | `"RGB"` for color, `"RS2_FORMAT_Z16"` for depth                |
-| gripper_position                         | list[float]  | (2,) [left, right] gripper positions                           |
-| slam_pose                               | dict or None | SLAM pose; None if unavailable                                 |
+The model does **not** predict head joints; `Pi05Policy` holds them at the
+last observed value when expanding the action chunk.
 
 ---
 
-### Post Action
+## 7. Troubleshooting
 
-**Endpoint:** `/actions`
-**Method:** `POST`
-
-Send a batch of target actions to the robot. The server automatically resamples the trajectory from `action_freq` to the execution rate (100 Hz for joint mode, 50 Hz for pose mode).
-
-Each action is a **dict** containing `robot_position` (required), and optionally `gripper_position` and `chassis_velocity`.
-
-#### Request Parameters
-
-| Parameter   | Type       | Required | Default  | Description                                                                      |
-|-------------|------------|----------|----------|----------------------------------------------------------------------------------|
-| actions     | list[dict] | Yes      | —        | List of action dicts (see format below). Each dict is one frame of the trajectory |
-| action_type | str        | No       | "joint"  | Control mode: `"joint"` or `"pose"`                                              |
-| action_freq | float      | No       | 30.0     | Source trajectory sampling rate in Hz (0 < freq ≤ 500)                           |
-
-The HTTP body should be a JSON object with the following structure:
-
-**Joint mode example:**
-
-```json
-{
-  "actions": [
-    {
-      "robot_position": {
-        "arm_joint_position": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        "head_joint_position": [0.0, 0.0, 0.0],
-        "waist_joint_position": [0.0, 0.0, 0.0, 0.0, 0.0]
-      },
-      "gripper_position": [0.0, 0.0],
-      "chassis_velocity": [0.0, 0.0, 0.0]
-    }
-  ],
-  "action_type": "joint",
-  "action_freq": 30.0
-}
-```
-
-**Pose mode example:**
-
-```json
-{
-  "actions": [
-    {
-      "robot_position": {
-        "left_end_position": [0.3, 0.2, 0.5],
-        "left_end_orientation": [0.0, 0.0, 0.0, 1.0],
-        "right_end_position": [0.3, -0.2, 0.5],
-        "right_end_orientation": [0.0, 0.0, 0.0, 1.0]
-      },
-      "gripper_position": [0.0, 0.0]
-    }
-  ],
-  "action_type": "pose",
-  "action_freq": 30.0
-}
-```
-
-#### Action dict fields
-
-| Field                                    | Type         | Required | Description                                          |
-|------------------------------------------|--------------|----------|------------------------------------------------------|
-| robot_position                           | dict         | Yes      | Joint or pose targets (see below)                    |
-| robot_position.arm_joint_position        | list[float]  | joint    | (14,) arm motor positions in radians                 |
-| robot_position.head_joint_position       | list[float]  | joint    | (3,) head motor positions in radians                 |
-| robot_position.waist_joint_position      | list[float]  | joint    | (5,) waist motor positions in radians                |
-| robot_position.left_end_position         | list[float]  | pose     | (3,) [x, y, z] in metres                            |
-| robot_position.left_end_orientation      | list[float]  | pose     | (4,) [qx, qy, qz, qw] quaternion                   |
-| robot_position.right_end_position        | list[float]  | pose     | (3,) [x, y, z] in metres                            |
-| robot_position.right_end_orientation     | list[float]  | pose     | (4,) [qx, qy, qz, qw] quaternion                   |
-| gripper_position                         | list[float]  | No       | (2,) [left, right] gripper positions                 |
-| chassis_velocity                         | list[float]  | No       | (3,) [vx, vy, wz] chassis velocity                  |
-
-#### Response Example
-
-```json
-{
-  "status": "accepted"
-}
-```
-
-#### Response Fields
-
-| Field  | Type   | Description                                 |
-|--------|--------|---------------------------------------------|
-| status | string | `"accepted"` — actions queued for execution |
+* **`Failed to import openpi`** — pass `--openpi-src "$(pwd)/src"` to
+  `demo.py` / `test.py`, or run `uv pip install -e .` first.
+* **Norm stats not found** — the training config uses
+  `<assets_base_dir>/<config_name>/<repo_id>/norm_stats.json`; rerun
+  `compute_norm_stats[_fast].py` with the same `G2_LEROBOT_REPO_ID` you used
+  during conversion.
+* **Norm stats path mismatch at inference** — `Pi05Policy._try_load_norm_stats`
+  falls back to any `assets/local/<*>/norm_stats.json` inside the checkpoint;
+  set `G2_LEROBOT_REPO_ID` to silence the warning.
+* **CUDA OOM during fine‑tuning** — reduce `batch_size`, increase
+  `fsdp_devices`, or swap to one of the smaller `action_horizon` configs.
 
 ---
 
-### Stop Motion
+## 8. License & credits
 
-**Endpoint:** `/stop_motion`
-**Method:** `POST`
-
-Cancel all pending actions on the robot.
-
-#### Request Parameters
-
-None (session is identified automatically).
-
-#### Response Example
-
-```json
-{
-  "status": "success"
-}
-```
-
-#### Response Fields
-
-| Field  | Type   | Description                                                  |
-|--------|--------|--------------------------------------------------------------|
-| status | string | `"success"` — all pending actions cancelled                  |
-
----
-
-### Get Status
-
-**Endpoint:** `/status`
-**Method:** `GET`
-
-Query the current motion playback status.
-
-#### Request Parameters
-
-None (session is identified automatically).
-
-#### Response Example
-
-```json
-{
-  "action_queue": 120,
-  "navigation_queue": 0,
-  "resetting": false,
-  "status": "pending actions"
-}
-```
-
-#### Response Fields
-
-| Field            | Type   | Description                                                                  |
-|------------------|--------|------------------------------------------------------------------------------|
-| action_queue     | int    | Remaining action frames yet to be sent to the robot                          |
-| navigation_queue | int    | Navigation targets in flight or queued                                       |
-| resetting        | bool   | Whether a reset operation is in progress                                     |
-| status           | string | `"free"`, `"resetting"`, `"navigating"`, `"pending actions"`, or `"pending"` |
-
-Status priority: `resetting` > actively `navigating` > actively `pending actions` > `pending` (queued, waiting for lock) > `free`.
-
----
-
-### Navigate to Position
-
-**Endpoint:** `/goto_navi_position`
-**Method:** `POST`
-
-Navigate the robot chassis to a map-frame goal. The server runs the navigation in the background; the response returns immediately.
-
-#### Request Parameters
-
-| Parameter  | Type | Required | Default | Description                                                                |
-|------------|------|----------|---------|----------------------------------------------------------------------------|
-| position   | dict | Yes      | —       | Goal with keys `position` [x, y, z] m and `orientation` [qx, qy, qz, qw] |
-| max_refine | int  | No       | 5       | Max chassis refinement iterations (1–100)                                  |
-
-The HTTP body should be a JSON object:
-
-```json
-{
-  "position": {
-    "position": [1.0, 2.0, 0.0],
-    "orientation": [0.0, 0.0, 0.0, 1.0]
-  },
-  "max_refine": 5
-}
-```
-
-#### Response Example
-
-```json
-{
-  "status": "accepted"
-}
-```
-
-#### Response Fields
-
-| Field  | Type   | Description                                                 |
-|--------|--------|-------------------------------------------------------------|
-| status | string | `"accepted"` — navigation goal queued for background execution |
-
----
-
-## Robot Specific Notes
-
-### G2 (Dual-Arm Humanoid)
-
-- Dual-arm humanoid robot with mobile chassis
-- 14 DOF arms (7 joints × 2 arms)
-- 3 DOF head, 5 DOF waist
-- 2 grippers (left, right), range **[-0.91, 0.0]** (0.0 = fully open, -0.91 = fully closed)
-
-**Joint control:**
-- `arm_joint_position`: 14 floats — `[left 7 joints, right 7 joints]` in radians
-- `head_joint_position`: 3 floats in radians
-- `waist_joint_position`: 5 floats in radians
-- `gripper_position`: 2 floats — `[left, right]`, range [-0.91, 0.0]
-
-**Pose control:**
-- `left_end_position`: `[x, y, z]` in metres (base_link frame)
-- `left_end_orientation`: `[qx, qy, qz, qw]` quaternion
-- `right_end_position`: `[x, y, z]` in metres (base_link frame)
-- `right_end_orientation`: `[qx, qy, qz, qw]` quaternion
-
-**Chassis control (optional in actions):**
-- `chassis_velocity`: `[vx, vy, wz]` — linear x, linear y, angular z
-
-**Joint limits (radians):**
-
-`waist_joint_position` (5 joints):
-
-| Index | Joint Name    | Min (rad) | Max (rad) |
-|-------|---------------|-----------|-----------|
-| 0     | body_joint1   | -1.0821   | 0.0002    |
-| 1     | body_joint2   | -0.0002   | 2.6529    |
-| 2     | body_joint3   | -1.9199   | 1.0390    |
-| 3     | body_joint4   | -0.4363   | 0.4363    |
-| 4     | body_joint5   | -3.0456   | 3.0456    |
-
-`head_joint_position` (3 joints):
-
-| Index | Joint Name    | Min (rad) | Max (rad) |
-|-------|---------------|-----------|-----------|
-| 0     | head_joint1   | -0.7810   | 0.7810    |
-| 1     | head_joint2   | -0.1510   | 0.1510    |
-| 2     | head_joint3   | -0.0180   | 0.5230    |
-
-`arm_joint_position` (14 joints = left 7 + right 7, left and right share the same limits):
-
-| Index (L/R) | Joint Name  | Min (rad) | Max (rad) |
-|-------------|-------------|-----------|-----------|
-| 0 / 7       | arm_joint1  | -3.0718   | 3.0718    |
-| 1 / 8       | arm_joint2  | -2.0595   | 2.0595    |
-| 2 / 9       | arm_joint3  | -3.0718   | 3.0718    |
-| 3 / 10      | arm_joint4  | -2.4958   | 1.0123    |
-| 4 / 11      | arm_joint5  | -3.0718   | 3.0718    |
-| 5 / 12      | arm_joint6  | -1.0123   | 1.0123    |
-| 6 / 13      | arm_joint7  | -1.5359   | 1.5359    |
-
-`gripper_position` (2 values):
-
-| Index | Side  | Min   | Max |
-|-------|-------|-------|-----|
-| 0     | Left  | -0.91 | 0.0 |
-| 1     | Right | -0.91 | 0.0 |
-
-> Values outside these limits are automatically clamped by the server before execution.
-
-**Cameras:**
-
-| Name              | Type  | Resolution  | Description          |
-|-------------------|-------|-------------|----------------------|
-| kHeadColor        | RGB   | 640 × 400   | Head-mounted color   |
-| kHeadDepth        | Z16   | 640 × 400   | Head-mounted depth   |
-| kHandLeftColor    | RGB   | 1280 × 1056 | Left arm-mounted     |
-| kHandRightColor   | RGB   | 1280 × 1056 | Right arm-mounted    |
-| kHeadStereoLeft   | RGB   | 1920 × 1536 | Head stereo (left)   |
-| kHeadStereoRight  | RGB   | 1920 × 1536 | Head stereo (right)  |
-
----
-
-## Contact
-
-For official inquiries or support, you can reach us via:
-- **GitHub Issues:** [https://github.com/RoboChallenge/RoboChallengeInference/issues](https://github.com/RoboChallenge/RoboChallengeInference/issues)
-- **Reddit:** [https://www.reddit.com/r/RoboChallenge/](https://www.reddit.com/r/RoboChallenge/)
-- **Discord:** [https://discord.gg/8pD8QWDv](https://discord.gg/8pD8QWDv)
-- **X (Twitter):** [https://x.com/RoboChallengeAI](https://x.com/RoboChallengeAI)
-- **HuggingFace:** [https://huggingface.co/RoboChallenge](https://huggingface.co/RoboChallenge)
-- **GitHub:** [https://github.com/RoboChallenge](https://github.com/RoboChallenge)
-- **Support Email:** [support@robochallenge.ai](mailto:support@robochallenge.ai)
+* Code: Apache 2.0 (see `LICENSE`). Pi0.5 / Pi0 weights and PaliGemma assets
+  retain their upstream licenses (`LICENSE_GEMMA.txt`).
+* This repo is derived from
+  [Physical‑Intelligence/openpi](https://github.com/Physical-Intelligence/openpi)
+  and uses the [LeRobot](https://github.com/huggingface/lerobot) dataset
+  format.
+* RoboChallenge platform & G2 robot: <https://api.robochallenge.cn/>.

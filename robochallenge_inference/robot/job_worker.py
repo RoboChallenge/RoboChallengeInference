@@ -1,6 +1,12 @@
 import time
 import logging
+from pathlib import Path
+
 import yaml
+
+# Next to this file so running ``uv run python robochallenge_inference/demo.py`` from
+# the repo root still works (no dependence on the process cwd).
+_CONFIG_YAML = Path(__file__).resolve().parent / "config.yaml"
 
 
 def process_job(client, gpu_client, job_id, robot_id,
@@ -89,7 +95,7 @@ def job_loop(client, gpu_client, run_id,
     MAX_EMPTY_POLLS = 10
     empty_poll_count = 0
 
-    with open("robot/config.yaml", "r") as f:
+    with open(_CONFIG_YAML, encoding="utf-8") as f:
         target_objects = yaml.safe_load(f)
 
     while True:
@@ -126,7 +132,7 @@ def job_loop(client, gpu_client, run_id,
                 process_job(
                     client, gpu_client, job_id, robot_id,
                     cameras, image_width, image_height,
-                    action_type, action_freq, target_objects
+                    action_type, action_freq, target_objects,
                 )
 
         time.sleep(1)
