@@ -71,7 +71,7 @@ Use this to debug observation decoding and action posting without an Arena run.
 ### 5. Submit
 
 - Log in to RoboChallenge Web and submit an evaluation request.
-- On **My Submissions**, open **Detail** for your run and copy the **Run ID** (used as `job_collection_id` below).
+- On **My Submissions**, open **Detail** for your run and copy the **Run ID** (used as `run_id` below).
 
 ### 6. Execute (official `demo.py`)
 
@@ -79,8 +79,8 @@ When your run is scheduled, start the client **from the repo root** and keep it 
 
 ```bash
 python3 demo.py \
-  --user_id <your_robochallenge_user_id> \
-  --job_collection_id <Run_ID_from_My_Submissions> \
+  --user_token <your_robochallenge_user_id> \
+  --run_id <Run_ID_from_My_Submissions> \
   --checkpoint /path/to/your/checkpoint
 ```
 
@@ -107,11 +107,11 @@ All robot interactions go through `InterfaceClient` (`robot/interface_client.py`
 from robot.interface_client import InterfaceClient
 from robot.job_worker import job_loop
 
-client = InterfaceClient(user_id="your_user_id")
+client = InterfaceClient(user_token="your_user_token")
 
 # job_loop automatically polls the Arena platform for assigned jobs,
 # extracts robot_id from the job info, and calls client.update_job_info() internally.
-job_loop(client, gpu_client, job_collection_id,
+job_loop(client, gpu_client, run_id,
          cameras=["kHeadColor", "kHandLeftColor", "kHandRightColor"],
          image_width=224, image_height=224,
          action_type="joint", action_freq=30.0)
@@ -503,8 +503,8 @@ The HTTP body should be a JSON object:
 | kHeadDepth        | Z16   | 640 × 400   | Head-mounted depth   |
 | kHandLeftColor    | RGB   | 1280 × 1056 | Left arm-mounted     |
 | kHandRightColor   | RGB   | 1280 × 1056 | Right arm-mounted    |
-| kHeadStereoLeft   | RGB   | —           | Head stereo (left)   |
-| kHeadStereoRight  | RGB   | —           | Head stereo (right)  |
+| kHeadStereoLeft   | RGB   | 1920 × 1536 | Head stereo (left)   |
+| kHeadStereoRight  | RGB   | 1920 × 1536 | Head stereo (right)  |
 
 ---
 

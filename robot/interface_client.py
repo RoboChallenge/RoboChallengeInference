@@ -18,10 +18,10 @@ RETRY_DELAY = 1
 
 
 class InterfaceClient:
-    def __init__(self, user_id, mock=False):
-        self.user_id = user_id
+    def __init__(self, user_token, mock=False):
+        self.user_token = user_token
         self.session = requests.Session()
-        self.session.headers.update({"x-user-id": user_id})
+        self.session.headers.update({"x-user-id": user_token})
         self.job_id = None
         self.robot_id = None
         self.robot_url = None
@@ -267,24 +267,24 @@ class InterfaceClient:
 
     def start_robot(self, job_id):
         url = f"{base_url}/jobs/update"
-        response = self._post(url, json={"job_id": job_id, "action": "start"}, headers={"x-user-id": self.user_id})
+        response = self._post(url, json={"job_id": job_id, "action": "start"}, headers={"x-user-id": self.user_token})
         return response
 
     def list_jobs(self):
-        response = self._get(f"{base_url}/jobs", headers={"x-user-id": self.user_id})
+        response = self._get(f"{base_url}/jobs", headers={"x-user-id": self.user_token})
         return response.json()
 
     def create_job(self, task_id, job_name):
-        response = self._post(f"{base_url}/jobs", headers={"x-user-id": self.user_id}, json={"task_id": task_id, "job_name": job_name})
+        response = self._post(f"{base_url}/jobs", headers={"x-user-id": self.user_token}, json={"task_id": task_id, "job_name": job_name})
         return response.json()
 
     def create_batch_jobs(self, task_id, times, model, job_collection_name):
         data = {"model": model, "times": times, "task_id": task_id, "job_collection_name": job_collection_name}
-        response = self._post(f"{base_url}/job_collections", json=data, headers={"x-user-id": self.user_id})
+        response = self._post(f"{base_url}/job_collections", json=data, headers={"x-user-id": self.user_token})
         return response.json()
 
     def get_batch_status(self, batch_id):
-        response = self._get(f"{base_url}/job_collections/{batch_id}", headers={"x-user-id": self.user_id}).json()
+        response = self._get(f"{base_url}/job_collections/{batch_id}", headers={"x-user-id": self.user_token}).json()
         device = response.get("device")
         cloud_info = response.get("cloud_info")
         return {
@@ -295,17 +295,17 @@ class InterfaceClient:
         }
 
     def put_batch_cloud_info(self, batch_id, cloud_info):
-        response = self._put(f"{base_url}/job_collections/cloud/{batch_id}", headers={"x-user-id": self.user_id}, json=cloud_info)
+        response = self._put(f"{base_url}/job_collections/cloud/{batch_id}", headers={"x-user-id": self.user_token}, json=cloud_info)
         return response.json()
 
     def get_all_batch_status(self):
-        response = self._get(f"{base_url}/job_collections", headers={"x-user-id": self.user_id}).json()
+        response = self._get(f"{base_url}/job_collections", headers={"x-user-id": self.user_token}).json()
         for batch in response["jobs"]:
             print(batch)
         return response
 
     def _get_job_status(self, job_id):
-        response = self._get(f"{base_url}/jobs/{job_id}", headers={"x-user-id": self.user_id})
+        response = self._get(f"{base_url}/jobs/{job_id}", headers={"x-user-id": self.user_token})
         return response.json()
 
     def wait_for_robot_ready(self, job_id, poll_interval=2):
@@ -334,9 +334,9 @@ class InterfaceClient:
         return response["device"], response["status"], response["task_id"], response["index"]
 
     def get_tasks(self):
-        response = self._get(f"{base_url}/tasks", headers={"x-user-id": self.user_id})
+        response = self._get(f"{base_url}/tasks", headers={"x-user-id": self.user_token})
         return response.json()
 
-    def get_all_jobs(self, job_collection_id):
-        response = self._get(f"{base_url}/job_collections/{job_collection_id}", headers={"x-user-id": self.user_id})
+    def get_all_jobs(self, run_id):
+        response = self._get(f"{base_url}/job_collections/{run_id}", headers={"x-user-id": self.user_token})
         return response.json()

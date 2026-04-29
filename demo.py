@@ -127,8 +127,8 @@ class GPUClient:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--user_id', type=str, required=True, help='User ID')
-    parser.add_argument('--job_collection_id', type=str, required=True,
+    parser.add_argument('--user_token', type=str, required=True, help='User token')
+    parser.add_argument('--run_id', type=str, required=True,
                         help='Job collection / run ID')
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Checkpoint path')
@@ -141,12 +141,12 @@ def main():
     action_type = "joint"
     action_freq = 30.0
 
-    client = InterfaceClient(args.user_id)
+    client = InterfaceClient(args.user_token)
     policy = DummyPolicy(args.checkpoint)
     gpu_client = GPUClient(policy)
 
     job_loop(
-        client, gpu_client, args.job_collection_id,
+        client, gpu_client, args.run_id,
         cameras, image_width, image_height,
         action_type, action_freq,
     )

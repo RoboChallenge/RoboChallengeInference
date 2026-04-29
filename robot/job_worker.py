@@ -40,7 +40,7 @@ def process_job(client, gpu_client, job_id, robot_id,
 
             playback = client.get_status()
             if playback and playback.get("status") != "free":
-                time.sleep(0.02)
+                time.sleep(0.5)
                 continue
 
             state = client.get_state(
@@ -71,14 +71,14 @@ def process_job(client, gpu_client, job_id, robot_id,
         logging.error(f"Error processing job {job_id}: {e}")
 
 
-def job_loop(client, gpu_client, job_collection_id,
+def job_loop(client, gpu_client, run_id,
              cameras, image_width, image_height, action_type, action_freq):
     """Poll a job collection and process ready jobs until all are finished.
 
     Args:
         client: InterfaceClient instance.
         gpu_client: Inference client with an ``infer(state)`` method.
-        job_collection_id: Job collection / run identifier.
+        run_id: Job collection / run identifier.
         cameras: Camera name list.
         image_width: Desired image width.
         image_height: Desired image height.
@@ -93,7 +93,7 @@ def job_loop(client, gpu_client, job_collection_id,
         target_objects = yaml.safe_load(f)
 
     while True:
-        job_collection = client.get_all_jobs(job_collection_id)
+        job_collection = client.get_all_jobs(run_id)
         jobs = job_collection["jobs"]
 
         has_active_job = False
