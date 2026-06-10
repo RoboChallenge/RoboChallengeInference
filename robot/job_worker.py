@@ -89,7 +89,12 @@ def job_loop(client, gpu_client, submission_id, image_size, image_type, action_t
     current_prompt = None
 
     while True:
-        job_collections = client.get_all_runs(submission_id)
+        try:
+            job_collections = client.get_all_runs(submission_id)
+        except Exception as e:
+            logging.error(f"Error fetching job collections for submission {submission_id}: {e}")
+            time.sleep(2)
+            continue
         target_job_collection = None
 
         if current_run_id is not None:
@@ -134,8 +139,13 @@ def job_loop(client, gpu_client, submission_id, image_size, image_type, action_t
                 f"job_collection  id: {current_run_id}, task name: {task_name}, prompt: {current_prompt}, robot tag: {robot_tag}, status: {status}"
             )
 
-        job_collection = client.get_all_jobs(current_run_id)
-        jobs = job_collection.get("jobs", [])
+        try:
+            job_collection = client.get_all_jobs(current_run_id)
+        except Exception as e:
+            logging.error(f"Error fetching jobs for run {current_run_id}: {e}")
+            time.sleep(2)
+            continue
+        jobs = job_collection.get("jobs") or []
 
         has_active_job = False
         exit_code = 0
