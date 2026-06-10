@@ -59,7 +59,6 @@ git checkout -b my-feature-branch
 #   Only one pair of ROBOT_TAG and RECORD_DATA_DIR should be active at a time.
 #   Ensure that the RECORD_DATA_DIR path matches the structure of your data folder.
 #   You can find the appropriate ROBOT_TAG in your training data or on our website.
-#   For the 20260413 CVPR package, you can use one of the following pairs:
 #     ROBOT_TAG='aloha', RECORD_DATA_DIR='../20260413/aloha/pack_the_toothbrush_holder'
 #     ROBOT_TAG='w1',    RECORD_DATA_DIR='../20260413/w1/sweep_the_trash'
 #     ROBOT_TAG='ur5',   RECORD_DATA_DIR='../20260413/ur5/arrange_fruits'
