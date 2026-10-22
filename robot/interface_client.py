@@ -12,7 +12,7 @@ from utils.util import timeout
 
 logger = setup_logger()
 
-base_url = "http://api.robochallenge.cn"
+base_url = "https://api.robochallenge.cn"
 mock_url = "http://127.0.0.1:9098"
 
 MAX_RETRY = 3
